@@ -1,4 +1,7 @@
+import blueprint from "./blueprint-en";
+
 const messages = {
+  blueprint,
   composerSources: {
     reference: "Reference a conversation…",
     group: "Conversations",

@@ -162,8 +162,8 @@ export async function touchChangeset(changesetId: string) {
 }
 
 /**
- * Lays tables out in layers by foreign-key depth: parents above children,
- * so the map reads top-down like the data model.
+ * Lays tables out in layers by foreign-key depth, parents left of children,
+ * so the map reads like the data model.
  */
 export function layoutTables(snapshot: SchemaSnapshot) {
   const depth = new Map<string, number>();
@@ -185,14 +185,19 @@ export function layoutTables(snapshot: SchemaSnapshot) {
   const layers = new Map<number, string[]>();
   for (const [name, d] of depth) layers.set(d, [...(layers.get(d) ?? []), name]);
   const positions = new Map<string, { x: number; y: number }>();
+  // Left to right: parents in earlier columns. Heights follow column counts.
   const COL = 300;
-  const ROW = 340;
+  const GAP = 48;
+  const height = (name: string) =>
+    44 + 19 * (snapshot.tables.find((t) => t.name === name)?.columns.length ?? 4);
   for (const [d, names] of layers) {
     names.sort();
-    const width = (names.length - 1) * COL;
-    names.forEach((name, i) => {
-      positions.set(name, { x: i * COL - width / 2, y: d * ROW });
-    });
+    const total = names.reduce((sum, n) => sum + height(n), 0) + GAP * (names.length - 1);
+    let y = -total / 2;
+    for (const name of names) {
+      positions.set(name, { x: d * COL, y: Math.round(y) });
+      y += height(name) + GAP;
+    }
   }
   return positions;
 }

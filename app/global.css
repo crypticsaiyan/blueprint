@@ -281,3 +281,118 @@
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.34);
 }
+
+/* Blueprint: ghost (proposed), conflict, backfill, and passed states. */
+:root {
+  --bp-ghost: 214 88% 50%;
+  --bp-conflict: 0 74% 52%;
+  --bp-fill: 32 92% 44%;
+  --bp-ok: 152 58% 36%;
+  --bp-grid: 0 0% 82%;
+}
+.dark {
+  --bp-ghost: 214 92% 66%;
+  --bp-conflict: 0 84% 64%;
+  --bp-fill: 38 92% 58%;
+  --bp-ok: 152 55% 52%;
+  --bp-grid: 0 0% 24%;
+}
+@theme inline {
+  --color-ghost: hsl(var(--bp-ghost));
+  --color-conflict: hsl(var(--bp-conflict));
+  --color-fill: hsl(var(--bp-fill));
+  --color-ok: hsl(var(--bp-ok));
+}
+
+.bp-canvas .react-flow__attribution {
+  background: transparent;
+  opacity: 0.6;
+}
+.bp-canvas .react-flow__handle {
+  width: 10px;
+  height: 10px;
+  border: 2px solid hsl(var(--background));
+  background: hsl(var(--muted-foreground));
+}
+.bp-canvas .react-flow__handle:hover,
+.bp-canvas .react-flow__handle.connectingfrom {
+  background: hsl(var(--bp-ghost));
+}
+.bp-canvas .react-flow__edge-textbg {
+  fill: hsl(var(--background));
+}
+.bp-canvas .react-flow__edge-text {
+  fill: hsl(var(--muted-foreground));
+  font-size: 10px;
+}
+.bp-canvas .react-flow__controls {
+  box-shadow: none;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.bp-canvas .react-flow__controls-button {
+  background: hsl(var(--background));
+  border-color: hsl(var(--border));
+  fill: hsl(var(--foreground));
+}
+.bp-canvas .react-flow__controls-button:hover {
+  background: hsl(var(--accent));
+}
+
+@keyframes bp-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px hsl(var(--bp-ghost) / 0.5), 0 0 0 0 hsl(var(--bp-ghost) / 0);
+  }
+  50% {
+    box-shadow: 0 0 0 1px hsl(var(--bp-ghost) / 0.7), 0 0 18px 2px hsl(var(--bp-ghost) / 0.28);
+  }
+}
+.bp-glow {
+  animation: bp-glow 2.4s ease-in-out infinite;
+}
+@keyframes bp-glow-conflict {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px hsl(var(--bp-conflict) / 0.6), 0 0 0 0 hsl(var(--bp-conflict) / 0);
+  }
+  50% {
+    box-shadow: 0 0 0 1px hsl(var(--bp-conflict) / 0.8), 0 0 18px 2px hsl(var(--bp-conflict) / 0.3);
+  }
+}
+.bp-glow-conflict {
+  animation: bp-glow-conflict 1.8s ease-in-out infinite;
+}
+@keyframes bp-cell-flash {
+  0% {
+    background: hsl(var(--bp-fill) / 0.45);
+  }
+  100% {
+    background: hsl(var(--bp-fill) / 0.12);
+  }
+}
+.bp-cell-changed {
+  animation: bp-cell-flash 1.2s ease-out both;
+}
+@keyframes bp-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.bp-row-in {
+  animation: bp-row-in 0.35s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bp-glow,
+  .bp-glow-conflict,
+  .bp-cell-changed,
+  .bp-row-in {
+    animation: none;
+  }
+}
