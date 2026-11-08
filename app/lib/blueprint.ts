@@ -7,6 +7,8 @@ import {
   type ChangeItem,
   type ProjectedSchema,
 } from "@shared/changes";
+import type { CodeAnalysis } from "@shared/code-types";
+import { computeImpact } from "@shared/impact";
 import type { RehearsalResult } from "@shared/rehearsal-types";
 import type { SchemaSnapshot } from "@shared/schema-types";
 
@@ -15,6 +17,8 @@ export type Selection =
   | { type: "edge"; id: string }
   | { type: "item"; id: string }
   | { type: "conflict"; key: string }
+  | { type: "module"; path: string }
+  | { type: "dep"; from: string; to: string }
   | null;
 
 export function parseSelection(raw: string | null): Selection {
@@ -28,6 +32,11 @@ export function parseSelection(raw: string | null): Selection {
   if (kind === "edge") return { type: "edge", id: ref };
   if (kind === "item") return { type: "item", id: ref };
   if (kind === "conflict") return { type: "conflict", key: ref };
+  if (kind === "module") return { type: "module", path: ref };
+  if (kind === "dep") {
+    const [from, to] = ref.split("->");
+    return from && to ? { type: "dep", from, to } : null;
+  }
   return null;
 }
 
@@ -42,6 +51,10 @@ export function selectionParam(selection: Selection): string | null {
       return `item:${selection.id}`;
     case "conflict":
       return `conflict:${selection.key}`;
+    case "module":
+      return `module:${selection.path}`;
+    case "dep":
+      return `dep:${selection.from}->${selection.to}`;
   }
 }
 
@@ -71,14 +84,19 @@ export function useProjectData(projectId: string) {
   const map = useActionQuery("get-project-map", { projectId });
   const changeset = useActionQuery("get-changeset", { projectId });
   const snapshot = map.data?.schema as unknown as SchemaSnapshot | undefined;
-  const items = (map.data?.changeset?.items ?? []) as unknown as ChangeItem[];
+  const rawItems = map.data?.changeset?.items;
+  const items = useMemo(() => (rawItems ?? []) as unknown as ChangeItem[], [rawItems]);
   const projected: ProjectedSchema | null = useMemo(
     () => (snapshot ? projectSchema(snapshot, items) : null),
     [snapshot, items],
   );
+  const code = (map.data?.code ?? null) as unknown as CodeAnalysis | null;
+  const impacts = useMemo(() => (code ? computeImpact(code, items) : []), [code, items]);
+  const rawRules = map.data?.rules;
+  const rules = useMemo(() => rawRules ?? [], [rawRules]);
   const rehearsal = changeset.data?.rehearsal ?? null;
   const result = (rehearsal?.result ?? null) as unknown as RehearsalResult | null;
-  return { map, changeset, snapshot, items, projected, rehearsal, result };
+  return { map, changeset, snapshot, items, projected, rehearsal, result, code, impacts, rules };
 }
 
 export function formatCell(value: unknown): string {

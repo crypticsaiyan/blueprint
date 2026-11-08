@@ -12,7 +12,8 @@ import {
   removeCheckout,
 } from "../server/lib/import.js";
 import { introspect } from "../server/lib/introspect.js";
-import { layoutTables, nowIso } from "../server/lib/projects.js";
+import { analyzeCode } from "../server/lib/code/index.js";
+import { layoutModules, layoutTables, nowIso } from "../server/lib/projects.js";
 import { loadDump } from "../server/lib/sandbox.js";
 
 export default defineAction({
@@ -90,6 +91,7 @@ export default defineAction({
       fail("The dump loaded but has no tables in the public schema.", { errorCode: "dump_invalid" });
     }
 
+    const code = await analyzeCode(repoPath, snapshot);
     const scope = { ownerEmail, orgId };
     const db = getDb();
     await db.insert(schema.projects).values({
@@ -100,6 +102,7 @@ export default defineAction({
       repoPath,
       dumpPath,
       schema: snapshot,
+      code,
       createdAt: nowIso(),
       updatedAt: nowIso(),
       ...scope,
@@ -118,7 +121,29 @@ export default defineAction({
         ...scope,
       })),
     );
-    const edges = snapshot.tables.flatMap((table) =>
+    const modulePositions = layoutModules(code.modules, positions);
+    if (code.modules.length) {
+      await db.insert(schema.mapNodes).values(
+        code.modules.map((module) => ({
+          id: crypto.randomUUID(),
+          projectId: id,
+          key: `module:${module.path}`,
+          kind: "module" as const,
+          label: module.label,
+          x: modulePositions.get(module.path)?.x ?? 0,
+          y: modulePositions.get(module.path)?.y ?? 0,
+          ...scope,
+        })),
+      );
+    }
+    const usageEdges = new Map<string, "reads" | "writes">();
+    for (const usage of code.usages) {
+      const key = `${usage.module}\u0000${usage.table}`;
+      if (usage.kind === "write" || !usageEdges.has(key)) {
+        usageEdges.set(key, usage.kind === "write" ? "writes" : "reads");
+      }
+    }
+    const edges: (typeof schema.mapEdges.$inferInsert)[] = snapshot.tables.flatMap((table) =>
       table.foreignKeys.map((fk) => ({
         id: crypto.randomUUID(),
         projectId: id,
@@ -129,6 +154,18 @@ export default defineAction({
         ...scope,
       })),
     );
+    for (const [key, kind] of usageEdges) {
+      const [module, table] = key.split("\u0000");
+      edges.push({
+        id: crypto.randomUUID(),
+        projectId: id,
+        kind,
+        sourceKey: `module:${module}`,
+        targetKey: `table:${table}`,
+        label: null,
+        ...scope,
+      });
+    }
     if (edges.length) await db.insert(schema.mapEdges).values(edges);
 
     const rows = snapshot.tables.reduce((sum, t) => sum + t.rowCount, 0);
@@ -137,7 +174,7 @@ export default defineAction({
       name,
       tables: snapshot.tables.length,
       rows,
-      message: `Imported ${name}: ${snapshot.tables.length} tables, ${rows} rows of sample data.`,
+      message: `Imported ${name}: ${snapshot.tables.length} tables, ${rows} rows of sample data, ${code.usages.length} queries in ${code.modules.length} modules${code.approximate ? " (approximate text search)" : ""}.`,
     };
   },
 });

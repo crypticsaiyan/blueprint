@@ -8,7 +8,7 @@ import { useWorkspace } from "@/routes/projects.$projectId";
 
 export default function ProjectMapRoute() {
   const workspace = useWorkspace();
-  const { projectId, projected, items, map, changeset, result, rehearsal } = workspace;
+  const { projectId, projected, items, map, changeset, result, rehearsal, code, impacts, rules } = workspace;
   const { selection, select } = useSelection();
   const [hydrated, setHydrated] = useState(false);
   const [bottomOpen, setBottomOpen] = useState(false);
@@ -44,6 +44,9 @@ export default function ProjectMapRoute() {
               onSelect={select}
               affectedTables={affectedTables}
               conflictTables={conflictTables}
+              code={code}
+              impacts={impacts}
+              rules={rules}
             />
           ) : null}
         </div>
@@ -53,6 +56,9 @@ export default function ProjectMapRoute() {
           sql={changeset.data?.sql ?? ""}
           result={result}
           stale={Boolean(rehearsal?.stale)}
+          impacts={impacts}
+          code={code}
+          onSelectModule={(path) => select({ type: "module", path })}
           tab={bottomTab}
           onTab={setBottomTab}
           open={bottomOpen}
@@ -67,6 +73,9 @@ export default function ProjectMapRoute() {
         selection={selection}
         onSelect={select}
         conflictItemIds={conflictItemIds}
+        code={code}
+        impacts={impacts}
+        rules={rules}
         onPreview={(table) => {
           select({ type: "table", table });
           setBottomTab("data");

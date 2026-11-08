@@ -31,8 +31,11 @@ import type { Selection } from "@/lib/blueprint";
 import { formatCell } from "@/lib/blueprint";
 import { cn } from "@/lib/utils";
 import type { ChangeItem, ProjectedEdge, ProjectedSchema } from "@shared/changes";
+import type { CodeAnalysis, CodeImpact } from "@shared/code-types";
 
 import { ChangeItemRow } from "./ChangeItemRow";
+import { DepDetail, ModuleDetail, TableQueries } from "./CodePanels";
+import type { Rule } from "./MapCanvas";
 import { shortType } from "./TableNode";
 
 interface InspectorProps {
@@ -44,6 +47,9 @@ interface InspectorProps {
   onSelect: (selection: Selection) => void;
   onPreview: (table: string) => void;
   conflictItemIds: Set<string>;
+  code: CodeAnalysis | null;
+  impacts: CodeImpact[];
+  rules: Rule[];
 }
 
 function touches(item: ChangeItem, table: string) {
@@ -63,6 +69,9 @@ export function Inspector({
   onSelect,
   onPreview,
   conflictItemIds,
+  code,
+  impacts,
+  rules,
 }: InspectorProps) {
   const t = useT();
   const ask = (message: string) => sendToAgentChat({ message, submit: true, openSidebar: true });
@@ -134,6 +143,7 @@ export function Inspector({
             <p className="text-xs text-muted-foreground">{t("blueprint.inspector.noChanges")}</p>
           )}
         </div>
+        {code ? <TableQueries table={table.name} code={code} impacts={impacts} /> : null}
       </section>
     ) : (
       <p className="border-b border-border p-4 text-sm text-muted-foreground">
@@ -143,6 +153,10 @@ export function Inspector({
   } else if (selection?.type === "edge") {
     const edge = projected.edges.find((e) => e.id === selection.id);
     if (edge) detail = <EdgeDetail edge={edge} projectId={projectId} items={ordered} onDone={() => onSelect(null)} />;
+  } else if (selection?.type === "module" && code) {
+    detail = <ModuleDetail path={selection.path} code={code} impacts={impacts} rules={rules} />;
+  } else if (selection?.type === "dep" && code) {
+    detail = <DepDetail projectId={projectId} from={selection.from} to={selection.to} code={code} rules={rules} />;
   }
 
   return (
@@ -175,10 +189,7 @@ export function Inspector({
                   item={item}
                   projectId={projectId}
                   conflict={conflictItemIds.has(item.id)}
-                  onSelect={() => {
-                    const table = item.payload.table;
-                    onSelect({ type: "table", table });
-                  }}
+                  onSelect={() => onSelect({ type: "table", table: item.payload.table })}
                 />
               ))}
             </ul>

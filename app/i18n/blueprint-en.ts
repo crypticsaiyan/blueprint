@@ -46,6 +46,8 @@ const blueprint = {
     newTable: "new",
     backfill: "backfill",
     fitView: "Fit to screen",
+    toolCode: "Code layer",
+    toolCodeHint: "Show modules and the tables their queries touch.",
   },
   inspector: {
     changeset: "Changeset",
@@ -96,6 +98,7 @@ const blueprint = {
   bottom: {
     data: "Data",
     sql: "Migration SQL",
+    impact: "Code impact",
     rehearsal: "Rehearsal",
     selectTable: "Select a table to preview its rows.",
     rowsOf: "{{shown}} of {{total}} rows",
@@ -105,6 +108,24 @@ const blueprint = {
     copied: "Copied",
     collapse: "Collapse panel",
     expand: "Expand panel",
+  },
+  code: {
+    queries: "{{count}} queries",
+    approximate: "approximate (text search)",
+    imports: "Imports",
+    fixModule: "Fix with agent",
+    fixModulePrompt:
+      "Fix the queries in {{path}} that the changeset breaks. Read the file, apply the smallest edits with fix-queries, then run the tests.",
+    dependency: "Module dependency",
+    forbidden: "Forbidden by a rule. The CI check fails until this import is gone.",
+    forbid: "Forbid this dependency",
+    ruleReason: "Why? (optional)",
+    ruleFailed: "Could not save the rule.",
+    fixRulePrompt:
+      "I forbade {{from}} from importing {{to}}. Propose and apply a fix for the violation with fix-queries, keeping behavior the same, then run the tests.",
+    impactEmpty: "No queries are affected by the changeset.",
+    breaks: "breaks",
+    review: "review",
   },
   rehearsal: {
     steps: "Steps",

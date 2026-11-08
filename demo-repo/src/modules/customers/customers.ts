@@ -2,6 +2,7 @@ import { asc, eq } from "drizzle-orm";
 
 import type { Db } from "../../db/client";
 import { customers } from "../../db/schema";
+import { listInvoicesForCustomer } from "../billing/invoices";
 
 export async function listCustomers(db: Db, ownerId: string) {
   return db
@@ -30,4 +31,11 @@ export async function createCustomer(
 export async function customersMissingEmail(db: Db) {
   const rows = await db.select().from(customers);
   return rows.filter((row) => !row.email);
+}
+
+export async function customerBalance(db: Db, customerId: string) {
+  const invoices = await listInvoicesForCustomer(db, customerId);
+  return invoices
+    .filter((invoice) => invoice.status === "sent" || invoice.status === "overdue")
+    .reduce((total, invoice) => total + invoice.totalCents, 0);
 }

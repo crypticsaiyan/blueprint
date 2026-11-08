@@ -201,3 +201,24 @@ export function layoutTables(snapshot: SchemaSnapshot) {
   }
   return positions;
 }
+
+/** Places code modules in rows above the tables. */
+export function layoutModules(
+  modules: { path: string }[],
+  tablePositions: Map<string, { x: number; y: number }>,
+) {
+  const xs = [...tablePositions.values()].map((p) => p.x);
+  const ys = [...tablePositions.values()].map((p) => p.y);
+  const minX = xs.length ? Math.min(...xs) : 0;
+  const maxX = xs.length ? Math.max(...xs) + 240 : 1200;
+  const top = ys.length ? Math.min(...ys) : 0;
+  const perRow = Math.max(1, Math.min(modules.length, Math.floor((maxX - minX + 40) / 230) || 1));
+  const rows = Math.ceil(modules.length / perRow);
+  const out = new Map<string, { x: number; y: number }>();
+  modules.forEach((module, index) => {
+    const row = Math.floor(index / perRow);
+    const col = index % perRow;
+    out.set(module.path, { x: minX + col * 230, y: top - 120 - (rows - row) * 90 });
+  });
+  return out;
+}

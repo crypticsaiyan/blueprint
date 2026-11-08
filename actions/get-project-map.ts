@@ -11,7 +11,7 @@ import { findOpenChangeset, loadItems, requireProject } from "../server/lib/proj
 
 export default defineAction({
   description:
-    "Read a project's map: every table with columns, keys, foreign keys and row counts (read from the sample Postgres database), canvas positions, and the open changeset's items. Call this before proposing changes.",
+    "Read a project's map: every table with columns, keys, foreign keys and row counts (read from the sample Postgres database), code modules with the queries they run (file, line, table, columns), dependency rules, canvas positions, and the open changeset's items. Call this before proposing changes.",
   schema: z.object({
     projectId: z.string().describe("Project id from list-projects or the current screen"),
   }),
@@ -25,6 +25,8 @@ export default defineAction({
       repoUrl: z.string().nullable(),
     }),
     schema: jsonObject,
+    code: jsonObject.nullable(),
+    rules: z.array(z.object({ id: z.string(), fromModule: z.string(), toModule: z.string(), reason: z.string() })),
     positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })),
     changeset: z
       .object({
@@ -83,6 +85,17 @@ export default defineAction({
         repoUrl: project.repoUrl,
       },
       schema: project.schema as SchemaSnapshot as unknown as Record<string, unknown>,
+      code: ((changeset?.code ?? project.code) as unknown as Record<string, unknown> | null) ?? null,
+      rules: await getDb()
+        .select({
+          id: schema.rules.id,
+          fromModule: schema.rules.fromModule,
+          toModule: schema.rules.toModule,
+          reason: schema.rules.reason,
+        })
+        .from(schema.rules)
+        .where(eq(schema.rules.projectId, projectId))
+        .limit(200),
       positions: Object.fromEntries(nodes.map((n) => [n.key, { x: n.x, y: n.y }])),
       changeset: changesetOut,
     };

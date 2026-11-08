@@ -8,9 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCell } from "@/lib/blueprint";
 import { cn } from "@/lib/utils";
+import type { CodeAnalysis, CodeImpact } from "@shared/code-types";
 import type { RehearsalResult } from "@shared/rehearsal-types";
 
-export type BottomTab = "data" | "sql" | "rehearsal";
+export type BottomTab = "data" | "impact" | "sql" | "rehearsal";
 
 export function BottomPanel({
   projectId,
@@ -22,7 +23,13 @@ export function BottomPanel({
   onTab,
   open,
   onOpenChange,
+  impacts,
+  code,
+  onSelectModule,
 }: {
+  impacts: CodeImpact[];
+  code: CodeAnalysis | null;
+  onSelectModule: (path: string) => void;
   projectId: string;
   table: string | null;
   sql: string;
@@ -36,6 +43,10 @@ export function BottomPanel({
   const t = useT();
   const tabs: { id: BottomTab; label: string }[] = [
     { id: "data", label: t("blueprint.bottom.data") },
+    {
+      id: "impact",
+      label: `${t("blueprint.bottom.impact")}${impacts.some((i) => i.severity === "breaks") ? ` (${impacts.filter((i) => i.severity === "breaks").length})` : ""}`,
+    },
     { id: "sql", label: t("blueprint.bottom.sql") },
     { id: "rehearsal", label: t("blueprint.bottom.rehearsal") },
   ];
@@ -83,6 +94,8 @@ export function BottomPanel({
             ) : (
               <p className="py-6 text-center text-sm text-muted-foreground">{t("blueprint.bottom.selectTable")}</p>
             )
+          ) : tab === "impact" ? (
+            <ImpactList impacts={impacts} code={code} onSelectModule={onSelectModule} />
           ) : tab === "sql" ? (
             <SqlView sql={sql} />
           ) : (
@@ -235,6 +248,54 @@ function RehearsalSummary({
       <Button asChild size="sm" variant="outline" className="h-7 text-xs">
         <Link to={`/projects/${encodeURIComponent(projectId)}/rehearse`}>{t("blueprint.bottom.openRehearsal")}</Link>
       </Button>
+    </div>
+  );
+}
+
+function ImpactList({
+  impacts,
+  code,
+  onSelectModule,
+}: {
+  impacts: CodeImpact[];
+  code: CodeAnalysis | null;
+  onSelectModule: (path: string) => void;
+}) {
+  const t = useT();
+  if (!impacts.length) {
+    return <p className="py-6 text-center text-sm text-muted-foreground">{t("blueprint.code.impactEmpty")}</p>;
+  }
+  const sorted = [...impacts].sort(
+    (a, b) => Number(a.severity === "review") - Number(b.severity === "review") || a.module.localeCompare(b.module) || a.line - b.line,
+  );
+  return (
+    <div className="space-y-1 pt-1">
+      {code?.approximate ? <p className="text-xs text-muted-foreground">{t("blueprint.code.approximate")}</p> : null}
+      <table className="w-full text-xs">
+        <tbody>
+          {sorted.map((impact) => (
+            <tr key={impact.usageId + impact.itemId} className="border-t border-border align-top">
+              <td className="py-1 pe-2">
+                <span
+                  className={cn(
+                    "rounded px-1 py-px text-[10px] font-medium uppercase",
+                    impact.severity === "breaks" ? "bg-conflict/15 text-conflict" : "bg-ghost/15 text-ghost",
+                  )}
+                >
+                  {t(`blueprint.code.${impact.severity}`)}
+                </span>
+              </td>
+              <td className="whitespace-nowrap py-1 pe-3 font-mono">
+                <button type="button" className="hover:underline" onClick={() => onSelectModule(impact.module)}>
+                  {impact.module}:{impact.line}
+                </button>
+              </td>
+              <td className="py-1 pe-3 font-mono text-muted-foreground">{impact.function}()</td>
+              <td className="py-1">{impact.reason}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -34,7 +34,14 @@ export const TableNode = memo(function TableNode({ data }: NodeProps<TableFlowNo
         conflict ? "bp-glow-conflict" : affected && "bp-glow",
       )}
     >
-      <Handle type="source" position={Position.Left} aria-label={`${table.name} belongs to`} />
+      <Handle id="fk-out" type="source" position={Position.Left} aria-label={`${table.name} belongs to`} />
+      <Handle
+        id="code"
+        type="target"
+        position={Position.Top}
+        isConnectable={false}
+        className="!size-1.5 !border-0 !bg-transparent"
+      />
       <div
         className={cn(
           "flex items-center gap-2 border-b px-3 py-2",
@@ -101,7 +108,7 @@ export const TableNode = memo(function TableNode({ data }: NodeProps<TableFlowNo
           );
         })}
       </ul>
-      <Handle type="target" position={Position.Right} aria-label={`Rows that belong to ${table.name}`} />
+      <Handle id="fk-in" type="target" position={Position.Right} aria-label={`Rows that belong to ${table.name}`} />
     </div>
   );
 });

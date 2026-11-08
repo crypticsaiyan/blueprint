@@ -2,7 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { listApiKeys, resolveApiKey } from "../src/modules/auth/api-keys";
 import { createUser, findUserByEmail, getUser } from "../src/modules/auth/users";
-import { createCustomer, listCustomers } from "../src/modules/customers/customers";
+import {
+  createCustomer,
+  customerBalance,
+  listCustomers,
+} from "../src/modules/customers/customers";
 import { activeProjectsForOwner, archiveProject } from "../src/modules/projects/projects";
 import type { Db } from "../src/db/client";
 import { createTestDb } from "./db";
@@ -53,6 +57,11 @@ describe("customers and projects", () => {
       email: "ap@zephyr.example",
     });
     expect((await listCustomers(db, "usr_04")).some((row) => row.id === "cus_new")).toBe(true);
+  });
+
+  it("sums a customer's unpaid balance", async () => {
+    const balance = await customerBalance(db, "cus_01");
+    expect(balance).toBeGreaterThanOrEqual(0);
   });
 
   it("archives a project so it leaves the active list", async () => {
