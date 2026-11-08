@@ -30,12 +30,6 @@ const updatedAt = () =>
     .notNull()
     .default(sql`now()`);
 
-// Child rows copy owner and org from their project so every table is scoped.
-const scope = () => ({
-  ownerEmail: text("owner_email").notNull(),
-  orgId: text("org_id"),
-});
-
 export const projects = pgTable("projects", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -60,7 +54,9 @@ export const mapNodes = pgTable(
     label: text("label").notNull(),
     x: real("x").notNull(),
     y: real("y").notNull(),
-    ...scope(),
+    // Copied from the project so every table is tenant-scoped.
+    ownerEmail: text("owner_email").notNull(),
+    orgId: text("org_id"),
   },
   (t) => [uniqueIndex("map_nodes_project_key_idx").on(t.projectId, t.key)],
 );
@@ -74,7 +70,9 @@ export const mapEdges = pgTable(
     sourceKey: text("source_key").notNull(),
     targetKey: text("target_key").notNull(),
     label: text("label"),
-    ...scope(),
+    // Copied from the project so every table is tenant-scoped.
+    ownerEmail: text("owner_email").notNull(),
+    orgId: text("org_id"),
   },
   (t) => [index("map_edges_project_idx").on(t.projectId)],
 );
@@ -90,7 +88,9 @@ export const changesets = pgTable(
       .default("open"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
-    ...scope(),
+    // Copied from the project so every table is tenant-scoped.
+    ownerEmail: text("owner_email").notNull(),
+    orgId: text("org_id"),
   },
   (t) => [index("changesets_project_idx").on(t.projectId, t.status)],
 );
@@ -112,7 +112,9 @@ export const changeItems = pgTable(
     position: integer("position").notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
-    ...scope(),
+    // Copied from the project so every table is tenant-scoped.
+    ownerEmail: text("owner_email").notNull(),
+    orgId: text("org_id"),
   },
   (t) => [index("change_items_changeset_idx").on(t.changesetId, t.position)],
 );
@@ -127,7 +129,9 @@ export const rehearsals = pgTable(
     sql: text("sql").notNull(),
     result: jsonb("result").$type<RehearsalResult>().notNull(),
     createdAt: createdAt(),
-    ...scope(),
+    // Copied from the project so every table is tenant-scoped.
+    ownerEmail: text("owner_email").notNull(),
+    orgId: text("org_id"),
   },
   (t) => [index("rehearsals_changeset_idx").on(t.changesetId, t.createdAt)],
 );
@@ -152,7 +156,9 @@ export const conflicts = pgTable(
       .default("open"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
-    ...scope(),
+    // Copied from the project so every table is tenant-scoped.
+    ownerEmail: text("owner_email").notNull(),
+    orgId: text("org_id"),
   },
   (t) => [uniqueIndex("conflicts_changeset_key_idx").on(t.changesetId, t.key)],
 );

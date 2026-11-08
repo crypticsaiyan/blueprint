@@ -7,9 +7,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import type { Db } from "../src/db/client";
 import * as schema from "../src/db/schema";
 
-// TALLYHUB_DUMP lets a migration tool run this suite against a migrated copy.
-const dumpPath =
-  process.env.TALLYHUB_DUMP ?? join(import.meta.dirname, "../db/dump.sql");
+const dumpPath = join(import.meta.dirname, "../db/dump.sql");
 
 export async function createTestDb(): Promise<{ db: Db; close: () => Promise<void> }> {
   const client = new PGlite();

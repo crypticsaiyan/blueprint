@@ -16,5 +16,4 @@ This is demo material for [Blueprint](../SPEC.md). The seed data in
 - `src/db/schema.ts`: Drizzle schema
 - `src/modules/*`: queries, grouped by feature
 - `db/dump.sql`: schema plus seed data (`npm run db:dump` regenerates it)
-- `tests/*`: Vitest suite, run against PGlite loaded from the dump.
-  Set `TALLYHUB_DUMP` to run it against another dump.
+- `tests/*`: Vitest suite, run against PGlite loaded from `db/dump.sql`

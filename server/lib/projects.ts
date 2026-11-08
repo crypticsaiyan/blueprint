@@ -1,5 +1,5 @@
 import { fail } from "@agent-native/core/action";
-import { assertAccess } from "@agent-native/core/sharing";
+import { accessFilter } from "@agent-native/core/sharing";
 import { and, asc, desc, eq } from "drizzle-orm";
 
 import {
@@ -20,21 +20,17 @@ export async function requireProject(
   projectId: string,
   role: "viewer" | "editor" = "viewer",
 ): Promise<ProjectRow> {
-  try {
-    await assertAccess("project", projectId, role);
-  } catch {
+  const { projects, projectShares } = schema;
+  const [project] = await getDb()
+    .select()
+    .from(projects)
+    .where(and(eq(projects.id, projectId), accessFilter(projects, projectShares, undefined, role)))
+    .limit(1);
+  if (!project) {
     fail("Project not found, or you do not have access to it.", {
       errorCode: "project_not_found",
       statusCode: 404,
     });
-  }
-  const [project] = await getDb()
-    .select()
-    .from(schema.projects)
-    .where(eq(schema.projects.id, projectId))
-    .limit(1);
-  if (!project) {
-    fail("Project not found.", { errorCode: "project_not_found", statusCode: 404 });
   }
   return project;
 }
