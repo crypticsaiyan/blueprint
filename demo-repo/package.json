@@ -1,0 +1,19 @@
+{
+  "name": "tallyhub",
+  "private": true,
+  "description": "Invoicing for small studios. Demo app for Blueprint.",
+  "type": "module",
+  "scripts": {
+    "db:dump": "node scripts/build-dump.mjs",
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.3"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.0"
+  }
+}

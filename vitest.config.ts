@@ -16,6 +16,7 @@ export default defineConfig({
       "**/.git/**",
       "**/dist/**",
       "**/.react-router/**",
+      "demo-repo/**",
     ],
   },
 });
