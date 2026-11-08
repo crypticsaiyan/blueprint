@@ -31,3 +31,26 @@ Use `adding-a-feature` for functional parity and `frontend-design` for a user-fa
 Before building common workspace or agent UI, read `agent-native-toolkit`; for supported customization, read `customizing-agent-native`.
 
 - Guarded verification: run `pnpm agent-native:doctor`; fix findings before done.
+
+## Blueprint
+
+See and safely ship Postgres schema changes with the agent. `/projects` imports a repo plus its SQL dump; `/projects/:id` is the map (tables, relationships, ghost changes; `?sel=table:<name>` selects); `/projects/:id/rehearse` shows the last rehearsal.
+
+- Schema comes from Postgres catalogs of the sample dump, never ORM files. Changes are change items in one open changeset per project: `proposed`, `accepted`, or `rejected`, optionally `locked`.
+- Locked rejected items must never be re-proposed (`locked_rejection`). Re-plan = `replan-changeset`, then `propose-changeset`.
+- Required columns: `nullable:false` plus a backfill item. The compiler adds the column nullable, runs backfills parents-first, then enforces NOT NULL.
+- Rehearsals run on a PGlite clone of the dump; nothing touches real data. Report conflicts with table and row count; let the user choose a fix unless told to decide.
+- `navigation` adds `projectId` and `selection` (`table:`, `edge:`, `item:`, `conflict:`).
+
+| Action | Purpose |
+|---|---|
+| import-repo | Demo or GitHub repo + SQL dump → project and map |
+| get-project-map | Tables, keys, row counts, positions, changeset items |
+| preview-table-data | Sample rows from one table |
+| propose-changeset | Add ghost items with reasons |
+| update-change-item | Accept, reject, edit, or lock one item |
+| replan-changeset | Drop unlocked agent items before a new plan |
+| draw-table / draw-relationship / delete-relationship | Canvas drawing |
+| get-changeset | Items, migration SQL, latest rehearsal, conflicts |
+| rehearse-migration | Run the migration on a copy of the data |
+| resolve-conflict | Choose a fix and re-rehearse |
