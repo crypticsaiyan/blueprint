@@ -34,23 +34,20 @@ Before building common workspace or agent UI, read `agent-native-toolkit`; for s
 
 ## Blueprint
 
-See and safely ship Postgres schema changes with the agent. `/projects` imports a repo plus its SQL dump; `/projects/:id` is the map (tables, relationships, ghost changes; `?sel=table:<name>` selects); `/projects/:id/rehearse` shows the last rehearsal.
+Ship Postgres schema changes safely. `/projects` imports repo + SQL dump; `/projects/:id` map (modules above tables, ghosts); `/rehearse` last rehearsal; `/ship` diff, tests, PR.
 
-- Schema comes from Postgres catalogs of the sample dump, never ORM files. Changes are change items in one open changeset per project: `proposed`, `accepted`, or `rejected`, optionally `locked`.
-- Locked rejected items must never be re-proposed (`locked_rejection`). Re-plan = `replan-changeset`, then `propose-changeset`.
-- Required columns: `nullable:false` plus a backfill item. The compiler adds the column nullable, runs backfills parents-first, then enforces NOT NULL.
-- Rehearsals run on a PGlite clone of the dump; nothing touches real data. Report conflicts with table and row count; let the user choose a fix unless told to decide.
-- `navigation` adds `projectId` and `selection` (`table:`, `edge:`, `item:`, `conflict:`).
+- Schema comes from the dump's Postgres catalogs. One open changeset of items: proposed/accepted/rejected, optional lock. Never re-propose a locked rejection; re-plan = `replan-changeset` then `propose-changeset`.
+- Required column = `nullable:false` + backfill item; compiler adds nullable, backfills parents-first, enforces NOT NULL.
+- Rehearsals run on a PGlite copy. Report conflicts with table and row count; user picks fixes unless told otherwise.
+- Code fixes land in a per-changeset working copy via `fix-queries`; schema, migration, and dump are generated. `run-tests` = tests + typecheck + rules on migrated data.
+- `navigation`: `projectId`, `selection` (`table:`, `edge:`, `module:`, `dep:a->b`).
 
 | Action | Purpose |
 |---|---|
-| import-repo | Demo or GitHub repo + SQL dump → project and map |
-| get-project-map | Tables, keys, row counts, positions, changeset items |
-| preview-table-data | Sample rows from one table |
-| propose-changeset | Add ghost items with reasons |
-| update-change-item | Accept, reject, edit, or lock one item |
-| replan-changeset | Drop unlocked agent items before a new plan |
+| import-repo / get-project-map | Import; read tables, modules, queries, items |
+| propose-changeset / update-change-item / replan-changeset | Plan and steer |
 | draw-table / draw-relationship / delete-relationship | Canvas drawing |
-| get-changeset | Items, migration SQL, latest rehearsal, conflicts |
-| rehearse-migration | Run the migration on a copy of the data |
-| resolve-conflict | Choose a fix and re-rehearse |
+| rehearse-migration / resolve-conflict | Run on data copy; fix conflicts |
+| find-code-impact / read-code-file / fix-queries / run-tests | Fix broken code |
+| add-rule | Forbid a module dependency |
+| get-ship-status / create-pr | Diff and blockers; open PR (ask first) |

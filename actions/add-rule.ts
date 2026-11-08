@@ -42,7 +42,7 @@ export default defineAction({
       id,
       violations: violations.map(({ from, to, line }) => ({ from, to, line })),
       message: violations.length
-        ? `Rule saved. ${violations.length} import${violations.length === 1 ? "" : "s"} violate it: ${violations.map((v) => `${v.from}:${v.line}`).join(", ")}.`
+        ? `Rule saved. ${violations.length} import${violations.length === 1 ? " violates" : "s violate"} it: ${violations.map((v) => `${v.from}:${v.line}`).join(", ")}.`
         : "Rule saved. No current imports violate it.",
       nextRequiredAction: violations.length ? "fix-queries" : undefined,
     };

@@ -48,7 +48,17 @@ export default defineAction({
       screen.selected = item
         ? { type: "item", ...item, summary: describeChange(item.payload) }
         : { type: "item", id: ref, missing: true };
-    } else if (kind === "conflict" || kind === "edge") {
+    } else if (kind === "module") {
+      const code = changeset?.code ?? project.code;
+      screen.selected = {
+        type: "module",
+        path: ref,
+        queries: code?.usages
+          .filter((u) => u.module === ref)
+          .map((u) => `${u.line} ${u.function}() ${u.operation} ${u.table}`) ?? [],
+        imports: code?.modules.find((m) => m.path === ref)?.imports ?? [],
+      };
+    } else if (kind === "conflict" || kind === "edge" || kind === "dep") {
       screen.selected = { type: kind, ref };
     }
     return screen;
