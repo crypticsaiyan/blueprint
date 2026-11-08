@@ -17,6 +17,8 @@ export default defineConfig({
       "**/dist/**",
       "**/.react-router/**",
       "demo-repo/**",
+      "data/**",
+      ".tmp/**",
     ],
   },
 });
