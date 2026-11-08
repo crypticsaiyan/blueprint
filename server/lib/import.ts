@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -39,14 +39,24 @@ export async function cloneRepo(url: string, projectId: string): Promise<string>
   await mkdir(REPOS_DIR, { recursive: true });
   noteExternalWrite("local-disk");
   try {
-    await exec("git", ["clone", "--depth", "1", url, dest], { timeout: 90_000 });
-  } catch (error) {
-    fail(`Could not clone ${url}: ${(error as Error).message.split("\n")[0]}`, {
-      errorCode: "clone_failed",
-      statusCode: 502,
+    await exec("git", ["clone", "--depth", "1", url, dest], {
+      timeout: 90_000,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     });
+  } catch (error) {
+    await removeCheckout(dest);
+    const stderr = String((error as { stderr?: unknown }).stderr ?? "");
+    const reason =
+      stderr.match(/fatal: (.*)/)?.[1] ?? "the repository is private, missing, or unreachable";
+    fail(`Could not clone ${url}: ${reason}`, { errorCode: "clone_failed", statusCode: 502 });
   }
   return dest;
+}
+
+/** Removes a checkout this import created, after the import failed. */
+export async function removeCheckout(dest: string) {
+  if (!dest.startsWith(REPOS_DIR + path.sep)) return;
+  await rm(dest, { recursive: true, force: true });
 }
 
 async function looksLikeDump(file: string) {

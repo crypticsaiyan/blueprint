@@ -9,6 +9,7 @@ import {
   DEMO_REPO_PATH,
   findDump,
   parseGithubUrl,
+  removeCheckout,
 } from "../server/lib/import.js";
 import { introspect } from "../server/lib/introspect.js";
 import { layoutTables, nowIso } from "../server/lib/projects.js";
@@ -65,7 +66,13 @@ export default defineAction({
       name = parsed.repo;
       repoUrl = `https://github.com/${parsed.owner}/${parsed.repo}`;
     }
-    const dumpPath = await findDump(repoPath, args.dumpPath);
+    let dumpPath: string;
+    try {
+      dumpPath = await findDump(repoPath, args.dumpPath);
+    } catch (error) {
+      if (args.source === "github") await removeCheckout(repoPath);
+      throw error;
+    }
 
     let snapshot;
     try {
@@ -73,6 +80,7 @@ export default defineAction({
       snapshot = await introspect(pg);
       await pg.close();
     } catch (error) {
+      if (args.source === "github") await removeCheckout(repoPath);
       fail(
         `The dump at ${path.relative(repoPath, dumpPath)} did not load into Postgres: ${(error as Error).message}`,
         { errorCode: "dump_invalid" },
