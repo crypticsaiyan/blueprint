@@ -18,13 +18,17 @@ export interface NavigationState {
   path?: string;
   publicPath?: string;
   threadId?: string;
+  projectId?: string;
+  /** Selected map item: "table:<name>", "edge:<table>.<column>-><ref>", "item:<id>", or "conflict:<key>". */
+  selection?: string;
 }
 
 export function useNavigationState() {
   useAgentRouteState<NavigationState>({
     browserTabId: TAB_ID,
     requestSource: TAB_ID,
-    getNavigationState: ({ pathname }) => navigationStateForPath(pathname),
+    getNavigationState: ({ pathname, searchParams }) =>
+      navigationStateForPath(pathname, searchParams),
     getCommandPath: commandPathForNavigation,
   });
 }
@@ -62,17 +66,27 @@ function matchesPathPrefix(pathname: string, prefix: string): boolean {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
 
-export function navigationStateForPath(pathname: string): NavigationState {
+export function navigationStateForPath(
+  pathname: string,
+  searchParams?: URLSearchParams,
+): NavigationState {
   const threadId = threadIdFromPath(pathname);
+  const projectId = pathname.match(/^\/projects\/([^/]+)/)?.[1];
+  const selection = searchParams?.get("sel");
   return {
     view: viewForPath(pathname),
     path: pathname,
     publicPath: appPathFromLocalRoute(pathname),
     ...(threadId ? { threadId } : {}),
+    ...(projectId ? { projectId: decodeURIComponent(projectId) } : {}),
+    ...(selection ? { selection } : {}),
   };
 }
 
 function viewForPath(pathname: string): string {
+  if (/^\/projects\/[^/]+\/rehearse/.test(pathname)) return "rehearse";
+  if (/^\/projects\/[^/]+/.test(pathname)) return "map";
+  if (pathname.startsWith("/projects")) return "projects";
   if (isChatPathname(pathname)) return "chat";
   if (pathname === HOME_PATH) return "home";
   if (pathname.startsWith("/database")) return "database";
@@ -93,6 +107,8 @@ function pathForView(view?: string): string {
       return NEW_CHAT_PATH;
     case "home":
       return HOME_PATH;
+    case "projects":
+      return "/projects";
     case "database":
       return "/database";
     case "extensions":
@@ -111,6 +127,12 @@ function pathForView(view?: string): string {
 }
 
 export function pathForCommand(command: any): string {
+  const projectId =
+    typeof command?.projectId === "string" ? command.projectId.trim() : "";
+  if (projectId && (command?.view === "map" || command?.view === "rehearse")) {
+    const base = `/projects/${encodeURIComponent(projectId)}`;
+    return command.view === "rehearse" ? `${base}/rehearse` : base;
+  }
   const path = pathForView(command?.view);
   if (command?.view !== "chat" && command?.view !== "ask") return path;
   const threadId =
