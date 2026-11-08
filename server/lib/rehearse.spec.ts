@@ -74,3 +74,39 @@ describe("rehearse on the demo data", () => {
     dropSource("spec");
   }, 60_000);
 });
+
+describe("shipping", () => {
+  it("replays the migration with its recorded fixes on a fresh copy, and dumps a loadable database", async () => {
+    const { compileMigration, shippableMigrationSql } = await import("../../shared/changes");
+    const { dumpDatabase } = await import("./dump");
+    const { PGlite } = await import("@electric-sql/pglite");
+    const items = [
+      item({ kind: "add_unique", table: "users", columns: ["email"], caseInsensitive: true }),
+      item({ kind: "add_foreign_key", table: "invoices", column: "customer_id", refTable: "customers", refColumn: "id" }),
+    ];
+    const first = await run(items);
+    const resolutions = first.conflicts.map((c) => ({
+      key: c.key,
+      fix: c.kind === "duplicates" ? ("merge_duplicates" as const) : ("delete_rows" as const),
+    }));
+    const pg = await cloneSource("spec", DUMP);
+    const snapshot = await introspect(pg);
+    const result = await rehearse({ pg, items, snapshot, resolutions });
+    expect(result.status).toBe("passed");
+    const dump = await dumpDatabase(pg, "spec");
+    await pg.close();
+
+    const fresh = await cloneSource("spec", DUMP);
+    await fresh.exec(shippableMigrationSql(compileMigration(items, snapshot), result));
+    const users = await fresh.query<{ n: number }>("SELECT count(*)::int AS n FROM users");
+    expect(users.rows[0]!.n).toBe(10);
+    await fresh.close();
+
+    const reloaded = new PGlite();
+    await reloaded.exec(dump);
+    const after = await introspect(reloaded);
+    expect(after.tables.find((t) => t.name === "invoices")!.foreignKeys.some((fk) => fk.refTable === "customers")).toBe(true);
+    expect(after.tables.find((t) => t.name === "users")!.uniques.some((u) => u.expression?.includes("lower"))).toBe(true);
+    await reloaded.close();
+  }, 60_000);
+});

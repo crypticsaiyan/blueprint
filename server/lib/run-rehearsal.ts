@@ -1,9 +1,10 @@
 import { and, eq, isNotNull } from "drizzle-orm";
 
-import { compileMigration, migrationSql, type ChangeItem } from "../../shared/changes.js";
+import { compileMigration, shippableMigrationSql, type ChangeItem } from "../../shared/changes.js";
 import type { FixId, RehearsalResult, Resolution } from "../../shared/rehearsal-types.js";
 import { getDb, schema } from "../db/index.js";
 import { nowIso, scopeOf, type ProjectRow } from "./projects.js";
+import { dumpDatabase } from "./dump.js";
 import { rehearse } from "./rehearse.js";
 import { cloneSource } from "./sandbox.js";
 
@@ -31,6 +32,18 @@ export async function dryRun(
   }
 }
 
+/** Rehearses with the saved fixes and returns the migrated data as a SQL dump. */
+export async function migratedDump(project: ProjectRow, changesetId: string, items: ChangeItem[]) {
+  const pg = await cloneSource(project.id, project.dumpPath);
+  try {
+    const result = await rehearse({ pg, items, snapshot: project.schema, resolutions: await savedResolutions(changesetId) });
+    if (result.status !== "passed") return { result, dump: null };
+    return { result, dump: await dumpDatabase(pg, `${project.name} sample data, migrated by Blueprint`) };
+  } finally {
+    await pg.close();
+  }
+}
+
 /** Runs a rehearsal and records it, with one conflict row per conflict key. */
 export async function recordRehearsal(
   project: ProjectRow,
@@ -47,7 +60,7 @@ export async function recordRehearsal(
     changesetId,
     projectId: project.id,
     status: result.status,
-    sql: migrationSql(compileMigration(items, project.schema)),
+    sql: shippableMigrationSql(compileMigration(items, project.schema), result),
     result,
     createdAt: nowIso(),
     ...scope,

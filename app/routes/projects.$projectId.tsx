@@ -64,6 +64,7 @@ export default function ProjectWorkspaceRoute() {
           {[
             { to: `/projects/${encodeURIComponent(projectId)}`, label: t("blueprint.workspace.tabMap"), end: true },
             { to: `/projects/${encodeURIComponent(projectId)}/rehearse`, label: t("blueprint.workspace.tabRehearse"), end: false },
+            { to: `/projects/${encodeURIComponent(projectId)}/ship`, label: t("blueprint.workspace.tabShip"), end: false },
           ].map((tab) => (
             <NavLink
               key={tab.to}

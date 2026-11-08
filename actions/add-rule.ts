@@ -36,9 +36,6 @@ export default defineAction({
       await db.insert(schema.rules).values({ id, projectId, fromModule, toModule, reason, createdAt: nowIso(), ...scopeOf(project) });
     }
     const changeset = await findOpenChangeset(projectId);
-    if (changeset) {
-      await db.update(schema.changesets).set({ updatedAt: nowIso() }).where(eq(schema.changesets.id, changeset.id));
-    }
     const analysis = await currentAnalysis(project, changeset);
     const violations = analysis ? findViolations(analysis, [{ fromModule, toModule, reason }]) : [];
     return {

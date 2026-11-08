@@ -206,9 +206,21 @@ async function detectConflict(
   };
 }
 
+/** Runs fix SQL and keeps the exact statements, so the shipped migration can replay them. */
+class FixRecorder {
+  statements: string[] = [];
+  constructor(private pg: Queryable) {}
+  async run(sql: string) {
+    this.statements.push(sql.replace(/\s+\n/g, "\n").trim() + ";");
+    return this.pg.query(sql);
+  }
+}
+
+export const literal = (value: string) => `'${value.replace(/'/g, "''")}'`;
+
 /** Deletes matching rows and, first, the rows that reference them. */
 async function deleteCascading(
-  pg: Queryable,
+  rec: FixRecorder,
   table: string,
   where: string,
   live: SchemaSnapshot,
@@ -220,7 +232,7 @@ async function deleteCascading(
   for (const ref of referencesTo(table, live, planned)) {
     if (ref.table === table) continue;
     await deleteCascading(
-      pg,
+      rec,
       ref.table,
       `${q(ref.column)} IN (SELECT ${q(ref.refColumn)} FROM ${q(table)} WHERE ${where})`,
       live,
@@ -229,7 +241,7 @@ async function deleteCascading(
       depth + 1,
     );
   }
-  const result = await pg.query(`DELETE FROM ${q(table)} WHERE ${where}`);
+  const result = await rec.run(`DELETE FROM ${q(table)} WHERE ${where}`);
   counts[table] = (counts[table] ?? 0) + (result.affectedRows ?? 0);
 }
 
@@ -246,71 +258,57 @@ async function applyFix(
   resolution: Resolution,
   live: SchemaSnapshot,
   planned: Reference[],
-): Promise<{ rowsAffected: number; detail: string }> {
+): Promise<{ rowsAffected: number; detail: string; sql: string[] }> {
+  const rec = new FixRecorder(pg);
   const table = live.tables.find((t) => t.name === check.table);
   const where = conflictWhere(check);
+  const done = (rowsAffected: number, detail: string) => ({ rowsAffected, detail, sql: rec.statements });
   switch (resolution.fix) {
     case "fill_value": {
       if (check.type !== "not_null") break;
       if (resolution.value === undefined || resolution.value === "") {
         throw new Error("This fix needs a value.");
       }
-      const result = await pg.query(
-        `UPDATE ${q(check.table)} SET ${q(check.column)} = $1 WHERE ${where}`,
-        [resolution.value],
+      const result = await rec.run(
+        `UPDATE ${q(check.table)} SET ${q(check.column)} = ${literal(resolution.value)} WHERE ${where}`,
       );
-      return {
-        rowsAffected: result.affectedRows ?? 0,
-        detail: `Filled ${result.affectedRows ?? 0} ${check.table}.${check.column} with ${JSON.stringify(resolution.value)}`,
-      };
+      return done(result.affectedRows ?? 0, `Filled ${result.affectedRows ?? 0} ${check.table}.${check.column} with ${JSON.stringify(resolution.value)}`);
     }
     case "delete_rows": {
       const counts: Record<string, number> = {};
-      await deleteCascading(pg, check.table, where, live, planned, counts);
+      await deleteCascading(rec, check.table, where, live, planned, counts);
       const total = Object.values(counts).reduce((a, b) => a + b, 0);
-      return { rowsAffected: total, detail: describeCounts("Deleted", counts) };
+      return done(total, describeCounts("Deleted", counts));
     }
     case "set_null": {
       if (check.type !== "foreign_key") break;
-      const result = await pg.query(
-        `UPDATE ${q(check.table)} SET ${q(check.column)} = NULL WHERE ${where}`,
-      );
-      return {
-        rowsAffected: result.affectedRows ?? 0,
-        detail: `Cleared ${result.affectedRows ?? 0} ${check.table}.${check.column}`,
-      };
+      const result = await rec.run(`UPDATE ${q(check.table)} SET ${q(check.column)} = NULL WHERE ${where}`);
+      return done(result.affectedRows ?? 0, `Cleared ${result.affectedRows ?? 0} ${check.table}.${check.column}`);
     }
     case "merge_duplicates": {
       if (check.type !== "unique" || !table || table.primaryKey.length !== 1) {
         throw new Error("Merging needs a single-column primary key.");
       }
       const pk = q(table.primaryKey[0]!);
-      const groups = await pg.query<{ ids: string[] }>(
-        `SELECT array_agg(${pk}::text ORDER BY ${orderClause(table)}) AS ids FROM ${q(check.table)} WHERE ${where} GROUP BY ${uniqueExpr(check)}`,
+      // Set-based so the same statements run unchanged against production.
+      await rec.run(
+        `CREATE TEMP TABLE blueprint_merge AS
+         SELECT ${pk} AS dupe, first_value(${pk}) OVER (PARTITION BY ${uniqueExpr(check)} ORDER BY ${orderClause(table)}) AS keep
+         FROM ${q(check.table)} WHERE ${where}`,
       );
+      await rec.run(`DELETE FROM blueprint_merge WHERE dupe = keep`);
       const counts: Record<string, number> = {};
-      const refs = referencesTo(check.table, live, planned);
-      let removed = 0;
-      for (const { ids } of groups.rows) {
-        const [keep, ...dupes] = ids;
-        if (!keep) continue;
-        for (const ref of refs) {
-          const moved = await pg.query(
-            `UPDATE ${q(ref.table)} SET ${q(ref.column)} = $1 WHERE ${q(ref.column)}::text = ANY($2::text[])`,
-            [keep, dupes],
-          );
-          counts[ref.table] = (counts[ref.table] ?? 0) + (moved.affectedRows ?? 0);
-        }
-        const deleted = await pg.query(
-          `DELETE FROM ${q(check.table)} WHERE ${pk}::text = ANY($1::text[])`,
-          [dupes],
+      for (const ref of referencesTo(check.table, live, planned)) {
+        const moved = await rec.run(
+          `UPDATE ${q(ref.table)} r SET ${q(ref.column)} = m.keep FROM blueprint_merge m WHERE r.${q(ref.column)} = m.dupe`,
         );
-        removed += deleted.affectedRows ?? 0;
+        counts[ref.table] = (counts[ref.table] ?? 0) + (moved.affectedRows ?? 0);
       }
-      return {
-        rowsAffected: removed,
-        detail: `Merged ${removed} duplicate ${check.table} into ${groups.rows.length}; ${describeCounts("repointed", counts)}`,
-      };
+      const keepers = await pg.query<{ n: number }>(`SELECT count(DISTINCT keep)::int AS n FROM blueprint_merge`);
+      const deleted = await rec.run(`DELETE FROM ${q(check.table)} t USING blueprint_merge m WHERE t.${pk} = m.dupe`);
+      await rec.run(`DROP TABLE blueprint_merge`);
+      const removed = deleted.affectedRows ?? 0;
+      return done(removed, `Merged ${removed} duplicate ${check.table} into ${keepers.rows[0]?.n ?? 0}; ${describeCounts("repointed", counts)}`);
     }
     case "rename_duplicates": {
       if (check.type !== "unique" || !table || table.primaryKey.length === 0) {
@@ -318,7 +316,7 @@ async function applyFix(
       }
       const col = q(check.columns[0]!);
       const pkMatch = table.primaryKey.map((c) => `t.${q(c)} = d.${q(c)}`).join(" AND ");
-      const result = await pg.query(
+      const result = await rec.run(
         `UPDATE ${q(check.table)} t
          SET ${col} = CASE WHEN t.${col}::text LIKE '%@%'
            THEN split_part(t.${col}::text, '@', 1) || '+dup' || (d.rn - 1) || '@' || split_part(t.${col}::text, '@', 2)
@@ -328,10 +326,7 @@ async function applyFix(
                FROM ${q(check.table)} WHERE ${where}) d
          WHERE ${pkMatch} AND d.rn > 1`,
       );
-      return {
-        rowsAffected: result.affectedRows ?? 0,
-        detail: `Renamed ${result.affectedRows ?? 0} duplicate ${check.table}.${check.columns[0]}`,
-      };
+      return done(result.affectedRows ?? 0, `Renamed ${result.affectedRows ?? 0} duplicate ${check.table}.${check.columns[0]}`);
     }
   }
   throw new Error(`Fix "${resolution.fix}" does not apply to this conflict.`);
@@ -438,6 +433,7 @@ export async function rehearse(options: {
     const t0 = Date.now();
     const base = { index, itemId: step.itemId, label: step.label, sql: step.sql, phase: step.phase };
     let fixDetail: string | undefined;
+    let fixSql: string[] | undefined;
     if (step.check) {
       const live = await introspect(pg);
       const conflict = await detectConflict(pg, step, step.check, live);
@@ -461,6 +457,7 @@ export async function rehearse(options: {
             applyFix(tx, step.check!, resolution, live, planned),
           );
           fixDetail = fixed.detail;
+          fixSql = fixed.sql;
           conflict.fixResult = fixed.detail;
         } catch (error) {
           results.push({
@@ -485,6 +482,7 @@ export async function rehearse(options: {
         status: fixDetail ? "fixed" : "ok",
         rowsAffected: affected,
         fixDetail,
+        fixSql,
         conflictKey: fixDetail ? conflicts[conflicts.length - 1]?.key : undefined,
         durationMs: Date.now() - t0,
       });

@@ -665,3 +665,25 @@ export function primaryKeyColumn(table: TableInfo | ProjectedTable): string | nu
   if ("primaryKey" in table) return table.primaryKey[0] ?? null;
   return table.columns.find((c) => c.isPrimaryKey)?.name ?? null;
 }
+
+/**
+ * The migration to ship: compiled steps with the chosen conflict fixes placed
+ * before the step they unblock, and skipped steps left out.
+ */
+export function shippableMigrationSql(
+  steps: MigrationStep[],
+  rehearsal: { steps: { label: string; status: string; fixSql?: string[] | undefined; fixDetail?: string | undefined }[] } | null,
+): string {
+  if (steps.length === 0) return "-- No changes yet.\n";
+  const parts = steps.flatMap((step, index) => {
+    const ran = rehearsal?.steps[index];
+    if (ran && ran.label === step.label && ran.status === "skipped") {
+      return [`-- ${step.label}: skipped (conflict left in place)`];
+    }
+    const fix = ran && ran.label === step.label && ran.fixSql?.length
+      ? [`-- Fix before "${step.label}": ${ran.fixDetail ?? "data fix"}\n${ran.fixSql.join("\n")}`]
+      : [];
+    return [...fix, `-- ${step.label}\n${step.sql}`];
+  });
+  return `BEGIN;\n\n${parts.join("\n\n")}\n\nCOMMIT;\n`;
+}

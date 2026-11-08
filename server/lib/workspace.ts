@@ -46,9 +46,15 @@ export async function hasWorkspace(changesetId: string) {
  * A changeset's working copy of the repo. Generated files and agent edits
  * land here; tests run here; the PR is the diff against the baseline tag.
  */
+const EXCLUDE = "node_modules/\n.vite/\ndist/\ncoverage/\n*.log\n.DS_Store\n";
+
 export async function ensureWorkspace(project: ProjectRow, changeset: ChangesetRow): Promise<string> {
   const dir = workspacePath(changeset.id);
-  if (await exists(path.join(dir, ".git"))) return dir;
+  if (await exists(path.join(dir, ".git"))) {
+    // Test runs leave caches behind; keep them out of the diff.
+    await writeFile(path.join(dir, ".git/info/exclude"), EXCLUDE);
+    return dir;
+  }
   await mkdir(WORKSPACES, { recursive: true });
   noteExternalWrite("local-disk");
   await cp(project.repoPath, dir, {
@@ -56,6 +62,8 @@ export async function ensureWorkspace(project: ProjectRow, changeset: ChangesetR
     filter: (source) => !COPY_SKIP.test(path.relative(project.repoPath, source)),
   });
   await git(dir, ["init", "-q", "-b", "main"]);
+  await mkdir(path.join(dir, ".git/info"), { recursive: true });
+  await writeFile(path.join(dir, ".git/info/exclude"), EXCLUDE);
   await git(dir, ["add", "-A"]);
   await git(dir, ["-c", "user.name=Blueprint", "-c", "user.email=blueprint@localhost", "commit", "-q", "-m", "Baseline", "--no-verify"]);
   await git(dir, ["tag", BASELINE]);
@@ -101,6 +109,9 @@ export interface WorkspaceDiff {
 }
 
 export async function workspaceDiff(dir: string): Promise<WorkspaceDiff> {
+  await writeFile(path.join(dir, ".git/info/exclude"), EXCLUDE);
+  // Drop anything an older run staged before it was excluded.
+  await git(dir, ["rm", "-r", "-q", "--cached", "--ignore-unmatch", "node_modules", ".vite", "dist", "coverage"]);
   await git(dir, ["add", "-A"]);
   const numstat = await git(dir, ["diff", "--cached", "--numstat", BASELINE]);
   const names = await git(dir, ["diff", "--cached", "--name-status", BASELINE]);

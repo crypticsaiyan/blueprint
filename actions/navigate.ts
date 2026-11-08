@@ -4,7 +4,7 @@ import { z } from "zod";
 
 export default defineAction({
   description:
-    "Navigate the UI: view \"projects\", \"map\" or \"rehearse\" (with projectId), \"chat\", or any path such as /projects/<id>?sel=table:users to select a table.",
+    "Navigate the UI: view \"projects\", \"map\", \"rehearse\" or \"ship\" (with projectId), \"chat\", or any path such as /projects/<id>?sel=table:users to select a table.",
   schema: z.object({
     view: z.string().optional().describe("View name to navigate to"),
     path: z.string().optional().describe("URL path to navigate to"),
@@ -12,7 +12,7 @@ export default defineAction({
     projectId: z
       .string()
       .optional()
-      .describe('Project to open with view "map" or "rehearse"'),
+      .describe('Project to open with view "map", "rehearse", or "ship"'),
   }),
   http: false,
   run: async (args) => {

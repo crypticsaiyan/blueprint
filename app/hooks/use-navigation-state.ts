@@ -85,6 +85,7 @@ export function navigationStateForPath(
 
 function viewForPath(pathname: string): string {
   if (/^\/projects\/[^/]+\/rehearse/.test(pathname)) return "rehearse";
+  if (/^\/projects\/[^/]+\/ship/.test(pathname)) return "ship";
   if (/^\/projects\/[^/]+/.test(pathname)) return "map";
   if (pathname.startsWith("/projects")) return "projects";
   if (isChatPathname(pathname)) return "chat";
@@ -129,9 +130,9 @@ function pathForView(view?: string): string {
 export function pathForCommand(command: any): string {
   const projectId =
     typeof command?.projectId === "string" ? command.projectId.trim() : "";
-  if (projectId && (command?.view === "map" || command?.view === "rehearse")) {
+  if (projectId && ["map", "rehearse", "ship"].includes(command?.view)) {
     const base = `/projects/${encodeURIComponent(projectId)}`;
-    return command.view === "rehearse" ? `${base}/rehearse` : base;
+    return command.view === "map" ? base : `${base}/${command.view}`;
   }
   const path = pathForView(command?.view);
   if (command?.view !== "chat" && command?.view !== "ask") return path;

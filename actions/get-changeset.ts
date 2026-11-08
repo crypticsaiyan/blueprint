@@ -3,7 +3,8 @@ import { desc, eq, ne } from "drizzle-orm";
 import { and } from "drizzle-orm";
 import { z } from "zod";
 
-import { compileMigration, describeChange, migrationSql } from "../shared/changes.js";
+import { compileMigration, describeChange, migrationSql, shippableMigrationSql } from "../shared/changes.js";
+import type { RehearsalResult } from "../shared/rehearsal-types.js";
 import { getDb, schema } from "../server/db/index.js";
 import { changeItemOutput, jsonObject } from "../server/lib/output-schemas.js";
 import { findOpenChangeset, loadItems, requireProject } from "../server/lib/projects.js";
@@ -66,7 +67,10 @@ export default defineAction({
         summary: describeChange(item.payload),
       })),
       steps: steps.map(({ itemId, phase, label, sql }) => ({ itemId, phase, label, sql })),
-      sql: migrationSql(steps),
+      sql:
+        rehearsal && rehearsal.createdAt >= changeset.updatedAt
+          ? shippableMigrationSql(steps, rehearsal.result as RehearsalResult)
+          : migrationSql(steps),
       rehearsal: rehearsal
         ? {
             id: rehearsal.id,

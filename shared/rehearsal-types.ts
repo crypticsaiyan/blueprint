@@ -55,6 +55,8 @@ export interface StepResult {
   error?: string | undefined;
   conflictKey?: string | undefined;
   fixDetail?: string | undefined;
+  /** Statements the fix ran before this step; the shipped migration replays them. */
+  fixSql?: string[] | undefined;
 }
 
 export interface RowDiff {

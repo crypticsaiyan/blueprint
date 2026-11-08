@@ -77,6 +77,32 @@ export function readDrizzleTables(file: SourceFile): DrizzleTable[] {
   return tables;
 }
 
+/**
+ * Property names written by `.values(x)` / `.set(x)`: keys of an object
+ * literal (and of spread objects), or of the inline type of a parameter.
+ */
+function writtenKeys(arg: Node | undefined, depth = 0): string[] {
+  if (!arg || depth > 3) return [];
+  if (Node.isObjectLiteralExpression(arg)) {
+    return arg.getProperties().flatMap((prop) => {
+      if (Node.isPropertyAssignment(prop) || Node.isShorthandPropertyAssignment(prop)) return [prop.getName()];
+      if (Node.isSpreadAssignment(prop)) return writtenKeys(prop.getExpression(), depth + 1);
+      return [];
+    });
+  }
+  if (Node.isIdentifier(arg)) {
+    for (const decl of arg.getSymbol()?.getDeclarations() ?? []) {
+      if (Node.isParameterDeclaration(decl) || Node.isVariableDeclaration(decl)) {
+        const type = decl.getTypeNode();
+        if (type && Node.isTypeLiteral(type)) return type.getProperties().map((p) => p.getName());
+        const init = Node.isVariableDeclaration(decl) ? decl.getInitializer() : undefined;
+        if (init) return writtenKeys(init, depth + 1);
+      }
+    }
+  }
+  return [];
+}
+
 function enclosingFunction(node: Node): string {
   for (const ancestor of node.getAncestors()) {
     if (Node.isFunctionDeclaration(ancestor) || Node.isMethodDeclaration(ancestor)) {
@@ -213,14 +239,9 @@ export async function analyzeTypescriptDrizzle(
           const name = inner.getExpression();
           if (!Node.isPropertyAccessExpression(name)) continue;
           if (!["values", "set"].includes(name.getName())) continue;
-          const objects = inner.getArguments().filter(Node.isObjectLiteralExpression);
-          for (const object of objects) {
-            for (const prop of object.getProperties()) {
-              if (Node.isPropertyAssignment(prop) || Node.isShorthandPropertyAssignment(prop)) {
-                const column = table.columns[prop.getName()];
-                if (column) columns.add(column);
-              }
-            }
+          for (const name of writtenKeys(inner.getArguments()[0])) {
+            const column = table.columns[name];
+            if (column) columns.add(column);
           }
         }
       }
