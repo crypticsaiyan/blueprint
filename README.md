@@ -4,7 +4,7 @@
 
 Blueprint is an agent-native workspace for schema changes. It reads your repo and a copy of your data, shows what a change will touch, runs the real migration on that copy, fixes the code that breaks, and opens a pull request that already passes your tests.
 
-Built for the Builder.io Agent-Native Hackathon.
+Built for the Builder.io Agent-Native Hackathon. Slides: [docs/blueprint-slides.pdf](docs/blueprint-slides.pdf).
 
 ## The problem
 
