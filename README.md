@@ -1,88 +1,156 @@
+<div align="center">
+
+<img src="docs/images/logo.svg" width="72" alt="Blueprint logo" />
+
 # Blueprint
 
 **See, rehearse, and ship Postgres schema changes before production finds out.**
 
-Blueprint is an agent-native workspace for schema changes. It reads your repo and a copy of your data, shows what a change will touch, runs the real migration on that copy, fixes the code that breaks, and opens a pull request that already passes your tests.
+An agent-native workspace that maps your schema and code, runs the real migration on a copy of your data, fixes the code that breaks, and opens a pull request that already passes your tests.
 
-Built for the Builder.io Agent-Native Hackathon. Slides: [docs/blueprint-slides.pdf](docs/blueprint-slides.pdf).
+[![Built with Agent-Native](https://img.shields.io/badge/built%20with-Agent--Native-18181b)](https://agent-native.com)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178c6?logo=typescript&logoColor=white)
+![Postgres](https://img.shields.io/badge/Postgres-4169e1?logo=postgresql&logoColor=white)
+![PGlite](https://img.shields.io/badge/PGlite-sandbox-27272a)
+![React Flow](https://img.shields.io/badge/React%20Flow-map-ff0072)
 
-## The problem
+[Slides](docs/blueprint-slides.pdf) · [Real pull request from the demo](https://github.com/crypticsaiyan/tallyhub/pull/3) · [Quick start](#quick-start)
+
+<br />
+
+<img src="docs/images/map.jpg" alt="The Blueprint map: tables, code modules, and a proposed changeset" width="100%" />
+
+</div>
+
+## Why Blueprint
 
 Schema changes are the riskiest deploys a team makes.
 
-- You can't see what a migration will break.
-- Real data hides duplicates, nulls, and orphaned rows that a constraint will trip over.
-- Code that reads the table breaks quietly.
-- You find out in production.
+- **You can't see what a migration will break.** Review shows SQL, not the queries and rows it affects.
+- **Real data is messy.** Duplicates, nulls, and orphaned rows trip constraints that passed every test.
+- **Code breaks quietly.** A new required column breaks inserts in modules nobody thought to check.
+- **You find out in production.**
 
-## How Blueprint solves it
+Blueprint moves all of that before the merge: you see the impact, rehearse on real data, and ship a pull request whose code and tests already work.
+
+## How it works
+
+```mermaid
+flowchart LR
+  A[Import repo<br/>and sample data] --> B[Plan the change<br/>agent or drawing]
+  B --> C[Rehearse on a<br/>PGlite copy]
+  C -->|conflicts| D[Pick a fix<br/>per conflict]
+  D --> C
+  C --> E[Tests and typecheck<br/>on migrated data]
+  E -->|failures| F[Agent fixes<br/>the code]
+  F --> E
+  E --> G[Open the PR]
+```
 
 ### 1. See the impact
 
-- **Import a repo** from GitHub, or try the bundled demo app, Tallyhub.
-- **The map** shows every table with its row count, and above them the code modules, with lines for which module reads or writes each table.
-- **Inspect** a table to see its columns, planned changes, every query that touches it, and its real rows. Inspect a module to see its queries line by line.
-- **Ask the agent** for a change in plain English, like "add multi-tenant orgs". It proposes a changeset: ghost tables and columns, drawn dashed on the map, each with a reason.
-- **Or draw it.** Sketch a new table and the agent fills in its columns. Drag a line between two tables and Blueprint proposes the column, the backfill, and the foreign key, and tells you how many existing rows the backfill can fill.
-- **Steer the plan.** Accept, reject, lock, or edit each change. Re-plan, and the agent works around your locked decisions.
+Import a repo and Blueprint builds **one map** of every table (with row counts from the sample data) and the code modules above it, with lines for which module reads or writes each table.
+
+- **Ask the agent** for a change in plain English, like "add multi-tenant orgs". It proposes a changeset of ghost tables and columns, drawn dashed on the map, each with a reason.
+- **Or draw it.** Drag a line between two tables to get the column, the backfill, and the foreign key, plus a count of the rows the backfill can fill. Sketch a new table and the agent fills in its columns.
+- **Steer it.** Accept, reject, lock, or edit each change. Re-plan, and the agent works around your locked decisions.
+- **Inspect anything.** Click a table for its columns, planned changes, queries, and real rows. Click a module for its queries, line by line.
 - **Code impact** lists every query the change affects, with file and line.
-- **Architecture rules.** Forbid an import between two modules; the violation is flagged and the agent can fix it.
+- **Architecture rules** forbid an import between two modules; the agent can fix the violation.
+
+<p align="center"><img src="docs/images/draw.gif" alt="Dragging a relationship from projects to orgs" width="80%" /></p>
+
+<p align="center"><img src="docs/images/impact.jpg" alt="Code impact: every affected query with file and line" width="80%" /></p>
 
 ### 2. Rehearse on real data
 
-- **Rehearse** runs the generated migration on a [PGlite](https://pglite.dev) copy of your sample data. Each step is listed with its timing, and every changed row is highlighted.
-- **Conflicts** show the exact rows that would fail in production: duplicates blocking a unique index, nulls breaking `NOT NULL`, orphans breaking a foreign key. Pick a fix for each (merge duplicates, rename them, delete or null out rows, fill a value, or keep the column nullable), or ask the agent, and the rehearsal runs again.
+Blueprint runs the generated migration on a [PGlite](https://pglite.dev) copy of your data. Each step is listed with its timing, and every changed row is highlighted, before and after.
+
+**Conflicts** show the exact rows that would fail in production: duplicates blocking a unique index, nulls breaking `NOT NULL`, orphans breaking a foreign key. Pick a fix for each (merge or rename duplicates, delete or null out rows, fill a value, or keep the column nullable), and the rehearsal runs again until it passes.
+
+<p align="center"><img src="docs/images/conflict.jpg" alt="A conflict: 22 invoices with no org_id would break NOT NULL" width="80%" /></p>
 
 ### 3. Ship a pull request that works
 
-- **The migration is generated** for you: new columns added nullable, backfills run parents first, constraints enforced last, all in one transaction. Drizzle and Prisma schemas and Supabase `Database` types are regenerated to match.
-- **Tests on migrated data.** Your repo's own tests and typecheck run in a working copy against the migrated data. When something fails, the agent fixes the queries with small, reviewable edits.
-- **Every changed file is labeled**: generated by Blueprint, fixed by the agent, or edited by you.
-- **One click opens the pull request** with the migration, backfill, schema, and code fixes.
+- **The migration is generated:** new columns added nullable, backfills run parents first, constraints enforced last, in one transaction. Drizzle and Prisma schemas and Supabase `Database` types are regenerated to match.
+- **Your tests run on the migrated data.** The repo's own test suite and typecheck run in a working copy. When something fails, the agent fixes the queries with small edits you can review.
+- **Every changed file is labeled:** generated by Blueprint, fixed by the agent, or edited by you.
+- **One click opens the pull request** with the migration, backfill, schema, and code fixes. [Here is a real one.](https://github.com/crypticsaiyan/tallyhub/pull/3)
+
+<p align="center"><img src="docs/images/ship.jpg" alt="The Ship page: 18 of 18 checks passed and the pull request opened" width="80%" /></p>
 
 ## Agent-native
 
-Every button in Blueprint is an [Agent-Native](https://agent-native.com) action that the agent can call too, so you and the agent always work on the same plan. Click it, or ask for it in chat.
+Every button in Blueprint is an [Agent-Native](https://agent-native.com) action the agent can call too. Click it, or ask for it in chat: you and the agent always work on the same plan.
 
-| Action | What it does |
+| Area | Actions |
 |---|---|
-| `import-repo`, `get-project-map`, `list-projects`, `delete-project` | Import a repo, read its tables, modules, queries, and changeset |
-| `propose-changeset`, `update-change-item`, `replan-changeset` | Plan a change and steer it |
-| `draw-table`, `draw-relationship`, `delete-relationship`, `arrange-map` | Draw on the map |
-| `rehearse-migration`, `resolve-conflict` | Run the migration on a data copy and fix conflicts |
-| `find-code-impact`, `read-code-file`, `fix-queries`, `run-tests`, `cancel-tests` | Find and fix broken code, run the tests |
-| `add-rule`, `delete-rule` | Forbid a dependency between modules |
-| `get-ship-status`, `create-pr` | Review the diff and open the pull request |
+| Import and read | `import-repo`, `get-project-map`, `list-projects`, `delete-project` |
+| Plan and steer | `propose-changeset`, `update-change-item`, `replan-changeset` |
+| Draw | `draw-table`, `draw-relationship`, `delete-relationship`, `arrange-map` |
+| Rehearse | `rehearse-migration`, `resolve-conflict` |
+| Fix code and test | `find-code-impact`, `read-code-file`, `fix-queries`, `run-tests`, `cancel-tests` |
+| Rules | `add-rule`, `delete-rule` |
+| Ship | `get-ship-status`, `create-pr` |
 
 ## Works on real repos
 
-Blueprint reads the schema from Postgres itself (a SQL dump, or the repo's migrations replayed in PGlite), so it does not depend on one ORM. It understands queries written with:
+Blueprint reads the schema from Postgres itself (a SQL dump, or the repo's migrations replayed in PGlite), so it is not tied to one ORM. It understands queries written with:
 
 - **Drizzle**, including `pgTableCreator` and `pgSchema`
 - **Prisma**, including relations
-- **supabase-js**, including other schemas with `.schema()`
-- Plain SQL, with text search as a fallback
+- **supabase-js**, including other schemas via `.schema()`
+- **Plain SQL**, with text search as a fallback
 
-It has been run on open source apps such as Documenso, Rallly, Kan, Vercel's AI Chatbot and Next.js Subscription Payments, Basejump, and the Next.js SaaS Starter. Tables outside `public` appear as `schema.table`, and Postgres extensions like pgvector load in the sandbox.
+It has been run on open source apps including Documenso, Rallly, Kan, Basejump, Vercel's AI Chatbot and Next.js Subscription Payments, and the Next.js SaaS Starter. Tables outside `public` appear as `schema.table`, and extensions such as pgvector load in the sandbox.
 
-## Run it locally
+<p align="center"><img src="docs/images/dashboard.jpg" alt="The projects dashboard with real open source repos" width="80%" /></p>
 
-Requirements: Node 22.22 or newer and pnpm 10.
+## Quick start
+
+Requirements: Node 22.22+ and pnpm 10.
 
 ```bash
+git clone https://github.com/crypticsaiyan/blueprint.git
+cd blueprint
 pnpm install
 pnpm dev
 ```
 
-Open http://localhost:8080, sign in (local dev offers "Continue as local dev"), then click **Import repository** and **Use the demo repo**.
+Open <http://localhost:8080>, choose **Continue as local dev**, then **Import repository → Use the demo repo**. Ask the agent to "add multi-tenant orgs" and follow the steps across the top: Plan, Rehearse, Ship.
 
-- **Agent model**: configure it in the agent sidebar settings; Blueprint uses whatever model the Agent-Native workspace is set up with.
-- **Opening pull requests**: add a GitHub token as the `GITHUB_TOKEN` secret in Settings → Secrets. Without it, everything except Create PR works.
-- **Importing a GitHub repo**: paste its URL, and optionally the path to a SQL dump or migrations folder.
+| Setting | Where | Needed for |
+|---|---|---|
+| Agent model | The model picker in the agent panel | Chatting with the agent |
+| `GITHUB_TOKEN` | Settings → Secrets | Opening pull requests |
+
+To import your own project, paste its GitHub URL and, optionally, the path to a SQL dump or migrations folder.
+
+> **Note:** importing a repo and running its tests executes that repo's code on the machine running Blueprint. Only import repos you trust.
 
 ## The demo repo
 
-`demo-repo/` is Tallyhub, a small invoicing app made for this project: 8 tables, Drizzle queries in six modules, a Vitest suite, and deliberately messy seed data in `db/dump.sql` (duplicate emails, missing emails, orphaned invoices). See [demo-repo/README.md](demo-repo/README.md).
+[`demo-repo/`](demo-repo) is **Tallyhub**, a small invoicing app made for this project: 8 tables, Drizzle queries in six modules, a Vitest suite, and deliberately messy seed data (duplicate emails, missing emails, orphaned invoices) so the rehearsal has real conflicts to find.
+
+## Architecture
+
+```text
+actions/                    one file per action, shared by the UI and the agent
+app/routes/                 projects dashboard, map, rehearse, ship
+app/components/blueprint/   map canvas, inspector, rehearsal and ship views
+server/lib/                 import, introspection, PGlite sandbox, rehearsal,
+                            test runner, working copies, pull requests
+server/lib/code/            code analysis and codegen: Drizzle, Prisma,
+                            supabase-js, Supabase types
+shared/changes.ts           changeset model: validation, projection, migration compiler
+demo-repo/                  Tallyhub, the demo app
+scripts/demo-edit/          records and edits the demo video
+```
+
+- **Schema** comes from Postgres catalogs, never from ORM files.
+- **Changesets** are lists of typed items (`create_table`, `add_column`, `backfill`, `add_foreign_key`, and so on). The compiler orders them into a safe migration: add nullable, backfill parents first, then enforce.
+- **Rehearsals** load the dump into PGlite, apply the migration step by step, and diff every table.
+- **Code fixes** land in a per-changeset working copy of the repo; tests run there against the migrated data, and the pull request is pushed from it.
 
 ## Development
 
@@ -92,29 +160,14 @@ pnpm typecheck               # TypeScript
 pnpm agent-native:doctor     # framework guardrails
 ```
 
-| Path | What lives there |
-|---|---|
-| `actions/` | One file per action, shared by the UI and the agent |
-| `app/routes/` | Screens: projects dashboard, map, rehearse, ship |
-| `app/components/blueprint/` | Map canvas, inspector, rehearsal and ship views |
-| `server/lib/` | Import, schema introspection, PGlite sandbox, rehearsal, test runner, working copies, pull requests |
-| `server/lib/code/` | Code analysis and codegen for Drizzle, Prisma, supabase-js, and Supabase types |
-| `shared/changes.ts` | The changeset model: validation, projection, migration compiler |
-| `scripts/demo-edit/` | Records the demo in 4K and edits it into the submission video |
-| `SPEC.md` | The original product spec |
-
-### Recording the demo video
-
-`scripts/demo-edit/record-4k.mjs` drives the real app in Chrome on a virtual 4K Hyprland monitor and records it with `wf-recorder`, logging where each action happens. `scripts/demo-edit/edit.mjs` turns the takes into the final cut: framed shots, a few zooms, title cards, captions, and a voiceover from AssemblyAI text-to-speech, timed to the actions. Everything in the video is the app really running.
+The demo video was recorded with [`scripts/demo-edit/`](scripts/demo-edit): it drives the real app in Chrome on a virtual 4K monitor, logs where each action happens, and edits the takes into the final cut with an AssemblyAI voiceover. Everything in the video is the app really running.
 
 ## Built with
 
-- [Agent-Native](https://agent-native.com): the app framework, agent, actions, auth, and UI shell
-- [PGlite](https://pglite.dev) and pgvector: the rehearsal sandbox
-- [React Flow](https://reactflow.dev): the map
-- [ts-morph](https://ts-morph.com): code analysis
-- [Drizzle ORM](https://orm.drizzle.team), [Octokit](https://github.com/octokit/octokit.js), React Router, TanStack Query, Tabler Icons, Inter
+[Agent-Native](https://agent-native.com) · [PGlite](https://pglite.dev) and pgvector · [React Flow](https://reactflow.dev) · [ts-morph](https://ts-morph.com) · [Drizzle ORM](https://orm.drizzle.team) · [Octokit](https://github.com/octokit/octokit.js) · React Router · TanStack Query · Tabler Icons · Inter
 
-## What existed before the hackathon
+## Hackathon disclosure
+
+Built for the Builder.io Agent-Native Hackathon by Rahul Joshi.
 
 Blueprint started from the Agent-Native **Chat** template (commit `c317c6c`), which provides the app shell, auth, the agent sidebar, and the UI components. Everything specific to Blueprint was built during the hackathon, starting 2026-11-08: the actions, the map, the changeset model, the PGlite rehearsal, code analysis and codegen, the test runner, the pull request flow, and the Tallyhub demo repo.
