@@ -189,13 +189,12 @@ function ConflictCard({ conflict, projectId }: { conflict: ConflictReport; proje
         <div className="min-w-0 flex-1">
           <p className={cn("text-sm font-medium", !resolved && "text-conflict")}>{conflict.message}</p>
           <p className="font-mono text-xs text-muted-foreground">{conflict.stepLabel}</p>
-          {conflict.fixResult ? (
+          {resolved ? (
             <p className="mt-1 text-xs text-fill">
               {t("blueprint.rehearsal.resolvedWith", {
                 fix: conflict.fixes.find((f) => f.id === conflict.resolution?.fix)?.label ?? "",
               })}
-              {" · "}
-              {conflict.fixResult}
+              {conflict.fixResult ? ` · ${conflict.fixResult}` : null}
             </p>
           ) : null}
         </div>
