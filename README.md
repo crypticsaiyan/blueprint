@@ -13,6 +13,7 @@ An agent-native workspace that maps your schema and code, runs the real migratio
 ![Postgres](https://img.shields.io/badge/Postgres-4169e1?logo=postgresql&logoColor=white)
 ![PGlite](https://img.shields.io/badge/PGlite-sandbox-27272a)
 ![React Flow](https://img.shields.io/badge/React%20Flow-map-ff0072)
+[![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
 [Slides](docs/blueprint-slides.pdf) · [Real pull request from the demo](https://github.com/crypticsaiyan/tallyhub/pull/3) · [Quick start](#quick-start)
 
@@ -171,3 +172,7 @@ The demo video was recorded with [`scripts/demo-edit/`](scripts/demo-edit): it d
 Built for the Builder.io Agent-Native Hackathon by Rahul Joshi.
 
 Blueprint started from the Agent-Native **Chat** template (commit `c317c6c`), which provides the app shell, auth, the agent sidebar, and the UI components. Everything specific to Blueprint was built during the hackathon, starting 2026-11-08: the actions, the map, the changeset model, the PGlite rehearsal, code analysis and codegen, the test runner, the pull request flow, and the Tallyhub demo repo.
+
+## License
+
+[MIT](LICENSE). Blueprint builds on the Agent-Native framework and template, which are also MIT licensed.
