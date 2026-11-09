@@ -24,9 +24,24 @@ const editSchema = z.union([
   }),
 ]);
 
+/** The file's real text around the find text's first line, so the next try can copy it exactly. */
+function nearMatch(file: string, find: string): string {
+  const lines = file.split("\n");
+  const probe = find.split("\n").map((l) => l.trim()).find((l) => l.length >= 8);
+  if (!probe) return "";
+  const at = lines.findIndex((l) => l.includes(probe) || l.trim() === probe);
+  if (at < 0) return " Its first line does not appear either; read the file again with read-code-file.";
+  const from = Math.max(0, at - 3);
+  const snippet = lines
+    .slice(from, at + 6)
+    .map((l, i) => `${from + i + 1}: ${l}`)
+    .join("\n");
+  return ` The closest match is near line ${at + 1}; the file actually reads:\n${snippet}\n`;
+}
+
 export default defineAction({
   description:
-    "Apply code edits to the changeset's working copy to fix queries the migration breaks (or dependency-rule violations). Each edit is an exact find/replace that must match once, or a full file. The Drizzle schema, migration, and sample data are generated from the changeset: change the changeset, not those files. Returns what still breaks. Read files with read-code-file first; run run-tests after.",
+    "Apply code edits to the changeset's working copy to fix queries the migration breaks (or dependency-rule violations). Each edit is an exact find/replace that must match once, or a full file. Edits are all-or-nothing: if any edit is rejected, nothing is written, so fix that edit and call again. The Drizzle schema, migration, and sample data are generated from the changeset: change the changeset, not those files. Returns what still breaks. Read files with read-code-file first; run run-tests after.",
   schema: z.object({
     projectId: z.string().describe("Project id"),
     summary: z.string().min(1).describe("One line: what the edits fix"),
@@ -47,11 +62,12 @@ export default defineAction({
     const generated = await generatedPaths(project, changeset);
 
     // Validate every edit before writing any, so a bad edit changes nothing.
+    const unchanged = " No edits were applied; the working copy is unchanged. Fix this edit and call fix-queries again with all edits.";
     const next = new Map<string, string>();
     for (const [index, edit] of edits.entries()) {
       const rel = edit.path.replace(/^\.?\//, "");
       if (generated.has(rel)) {
-        fail(`Edit ${index + 1}: ${rel} is generated from the changeset; change the changeset instead.`, {
+        fail(`Edit ${index + 1}: ${rel} is generated from the changeset; change the changeset instead.${unchanged}`, {
           errorCode: "generated_file",
         });
       }
@@ -60,11 +76,16 @@ export default defineAction({
         next.set(rel, edit.content);
         continue;
       }
-      if (current === null) fail(`Edit ${index + 1}: ${rel} does not exist.`, { errorCode: "file_not_found" });
+      if (current === null) fail(`Edit ${index + 1}: ${rel} does not exist.${unchanged}`, { errorCode: "file_not_found" });
       const count = current.split(edit.find).length - 1;
-      if (count !== 1) {
+      if (count === 0) {
+        fail(`Edit ${index + 1}: the find text is not in ${rel}.${nearMatch(current, edit.find)}${unchanged}`, {
+          errorCode: "edit_not_found",
+        });
+      }
+      if (count > 1) {
         fail(
-          `Edit ${index + 1}: the find text occurs ${count} times in ${rel}; it must occur exactly once. Include more surrounding lines.`,
+          `Edit ${index + 1}: the find text occurs ${count} times in ${rel}; it must occur exactly once. Include more surrounding lines.${unchanged}`,
           { errorCode: "ambiguous_edit" },
         );
       }

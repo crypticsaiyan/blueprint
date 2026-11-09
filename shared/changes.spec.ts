@@ -5,6 +5,7 @@ import {
   changePayloadSchema,
   compileMigration,
   findBackfillPath,
+  planDependencies,
   projectSchema,
   validateAgainst,
   type ChangeItem,
@@ -103,5 +104,32 @@ describe("findBackfillPath", () => {
 
   it("returns null when nothing connects", () => {
     expect(findBackfillPath(projectSchema(snapshot, []), "invoices", "users")).toBeNull();
+  });
+});
+
+describe("planDependencies", () => {
+  it("keeps the agent items a drawing builds on, and nothing else", () => {
+    const orgs = item({ kind: "create_table", table: "orgs", columns: [{ name: "id", type: "text", nullable: false, primaryKey: true }] });
+    const customerOrg = item({ kind: "add_column", table: "customers", column: { name: "org_id", type: "text", nullable: false } });
+    const customerFill = item({ kind: "backfill", table: "customers", column: "org_id", sql: "UPDATE customers SET org_id = owner_id;" });
+    const userOrg = item({ kind: "add_column", table: "users", column: { name: "org_id", type: "text" } });
+    const index = item({ kind: "add_index", table: "users", columns: ["org_id"] });
+    const drawn = [
+      item({ kind: "add_column", table: "invoices", column: { name: "org_id", type: "text" } }, "accepted"),
+      item(
+        { kind: "backfill", table: "invoices", column: "org_id", sql: 'UPDATE "invoices" t SET "org_id" = t2."org_id" FROM "customers" t2 WHERE t2."id" = t."customer_id";' },
+        "accepted",
+      ),
+      item({ kind: "add_foreign_key", table: "invoices", column: "org_id", refTable: "orgs", refColumn: "id" }, "accepted"),
+    ].map((i) => ({ ...i, origin: "drawing" as const }));
+    const all = [orgs, customerOrg, customerFill, userOrg, index, ...drawn];
+    const deps = planDependencies(all, new Set(drawn.map((i) => i.id)));
+    expect([...deps].sort()).toEqual([orgs.id, customerOrg.id, customerFill.id].sort());
+  });
+
+  it("keeps nothing when the kept items stand alone", () => {
+    const agent = item({ kind: "add_index", table: "users", columns: ["email"] });
+    const locked = { ...item({ kind: "add_index", table: "invoices", columns: ["customer_id"] }), locked: true };
+    expect(planDependencies([agent, locked], new Set([locked.id])).size).toBe(0);
   });
 });

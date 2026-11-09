@@ -2,7 +2,7 @@ import { defineAction } from "@agent-native/core/action";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
-import { describeChange } from "../shared/changes.js";
+import { describeChange, planDependencies } from "../shared/changes.js";
 import { getDb, schema } from "../server/db/index.js";
 import {
   findOpenChangeset,
@@ -13,7 +13,7 @@ import {
 
 export default defineAction({
   description:
-    "Start a re-plan: removes the agent's unlocked items and keeps locked items and the user's drawings. Returns the goal and what was kept. Then call propose-changeset with a new plan that keeps locked accepted items and avoids locked rejected ones.",
+    "Start a re-plan: removes the agent's unlocked items and keeps locked items, the user's drawings, and the agent items those build on (the table a drawn foreign key points at, the column its backfill reads). Returns the goal and what was kept. Then call propose-changeset with a new plan that keeps locked accepted items and avoids locked rejected ones.",
   schema: z.object({
     projectId: z.string().describe("Project id"),
   }),
@@ -33,7 +33,9 @@ export default defineAction({
       return { id: null, goal: "", removed: 0, keep: [], avoid: [], message: "No changeset to re-plan." };
     }
     const items = await loadItems(changeset.id);
-    const removable = items.filter((i) => !i.locked && i.origin === "agent");
+    const pinned = new Set(items.filter((i) => i.locked || i.origin !== "agent").map((i) => i.id));
+    const dependencies = planDependencies(items, pinned);
+    const removable = items.filter((i) => !pinned.has(i.id) && !dependencies.has(i.id));
     if (removable.length) {
       await getDb()
         .delete(schema.changeItems)
@@ -59,7 +61,11 @@ export default defineAction({
       avoid: kept
         .filter((i) => i.status === "rejected")
         .map((i) => ({ id: i.id, summary: describeChange(i.payload), reason: i.reason })),
-      message: `Removed ${removable.length} unlocked item${removable.length === 1 ? "" : "s"}; kept ${kept.length}.`,
+      message:
+        `Removed ${removable.length} unlocked item${removable.length === 1 ? "" : "s"}; kept ${kept.length}.` +
+        (dependencies.size
+          ? ` ${dependencies.size} of the kept items are earlier proposals that locked or drawn items build on; keep them and don't propose them again.`
+          : ""),
       nextRequiredAction: "propose-changeset",
     };
   },

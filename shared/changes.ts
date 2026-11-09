@@ -134,6 +134,93 @@ export function activeItems<T extends Pick<ChangeItem, "status">>(items: T[]): T
   return items.filter((item) => item.status !== "rejected");
 }
 
+const mentions = (sql: string, name: string) =>
+  new RegExp(`(^|[^\\w$])"?${name.replace(/[.$]/g, "\\$&")}"?($|[^\\w$])`, "i").test(sql);
+
+/** Tables and `table.column` names an item needs to exist before it. */
+function needs(p: ChangePayload): { tables: string[]; columns: string[] } {
+  switch (p.kind) {
+    case "create_table":
+      return {
+        tables: p.columns.flatMap((c) => (c.references ? [c.references.table] : [])),
+        columns: p.columns.flatMap((c) => (c.references ? [`${c.references.table}.${c.references.column}`] : [])),
+      };
+    case "add_column":
+      return {
+        tables: [p.table, ...(p.column.references ? [p.column.references.table] : [])],
+        columns: p.column.references ? [`${p.column.references.table}.${p.column.references.column}`] : [],
+      };
+    case "set_not_null":
+      return { tables: [p.table], columns: [`${p.table}.${p.column}`] };
+    case "add_unique":
+    case "add_index":
+      return { tables: [p.table], columns: p.columns.map((c) => `${p.table}.${c}`) };
+    case "add_foreign_key":
+      return { tables: [p.table, p.refTable], columns: [`${p.table}.${p.column}`, `${p.refTable}.${p.refColumn}`] };
+    case "drop_foreign_key":
+      return { tables: [p.table], columns: [] };
+    case "backfill":
+      return { tables: [p.table], columns: p.column ? [`${p.table}.${p.column}`] : [] };
+  }
+}
+
+/**
+ * Re-planning removes the agent's unlocked items, but a kept item (locked, or
+ * drawn by the user) may build on some of them: a drawn foreign key points at
+ * the agent's new table, and its backfill reads the agent's new column. Returns
+ * the ids of those agent items, with the backfill and NOT NULL that complete
+ * each kept new column, so the kept plan still compiles.
+ */
+export function planDependencies(items: ChangeItem[], kept: ReadonlySet<string>): Set<string> {
+  const keep = new Set(kept);
+  const candidates = items.filter((i) => !keep.has(i.id) && i.status !== "rejected");
+  const provides = (i: ChangeItem): { tables: string[]; columns: string[] } => {
+    const p = i.payload;
+    if (p.kind === "create_table") return { tables: [p.table], columns: p.columns.map((c) => `${p.table}.${c.name}`) };
+    if (p.kind === "add_column") return { tables: [], columns: [`${p.table}.${p.column.name}`] };
+    return { tables: [], columns: [] };
+  };
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const holders = items.filter((i) => keep.has(i.id) && i.status !== "rejected");
+    for (const candidate of candidates) {
+      if (keep.has(candidate.id)) continue;
+      const made = provides(candidate);
+      const cp = candidate.payload;
+      const needed = holders.some((holder) => {
+        const want = needs(holder.payload);
+        if (made.tables.some((t) => want.tables.includes(t))) return true;
+        if (made.columns.some((c) => want.columns.includes(c))) return true;
+        const hp = holder.payload;
+        // A kept backfill's SQL may read the candidate's table or column.
+        if (hp.kind === "backfill") {
+          if (made.tables.some((t) => mentions(hp.sql, bareTable(t)))) return true;
+          if (
+            made.columns.some((c) => {
+              const dot = c.lastIndexOf(".");
+              return mentions(hp.sql, bareTable(c.slice(0, dot))) && mentions(hp.sql, c.slice(dot + 1));
+            })
+          ) {
+            return true;
+          }
+        }
+        // A kept new column keeps the backfill and NOT NULL that complete it.
+        if (hp.kind === "add_column" && (cp.kind === "backfill" || cp.kind === "set_not_null")) {
+          return cp.table === hp.table && cp.column === hp.column.name;
+        }
+        return false;
+      });
+      if (needed) {
+        keep.add(candidate.id);
+        changed = true;
+      }
+    }
+  }
+  for (const id of kept) keep.delete(id);
+  return keep;
+}
+
 export function describeChange(payload: ChangePayload): string {
   switch (payload.kind) {
     case "create_table":

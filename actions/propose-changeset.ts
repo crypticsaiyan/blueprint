@@ -60,7 +60,13 @@ export default defineAction({
     const lockedRejected = existing.filter((i) => i.locked && i.status === "rejected");
     const working: ChangeItem[] = [...existing];
     let position = await nextPosition(changeset.id, existing);
+    // A re-plan keeps items the agent may list again; adding them twice is a no-op, not an error.
+    const fresh = items.filter(
+      (entry) => !existing.some((i) => i.status !== "rejected" && samePayload(i.payload, entry.change)),
+    );
+    const skipped = items.length - fresh.length;
     for (const [index, entry] of items.entries()) {
+      if (!fresh.includes(entry)) continue;
       if (lockedRejected.some((r) => samePayload(r.payload, entry.change))) {
         fail(
           `Item ${index + 1} (${describeChange(entry.change)}) repeats a change the user rejected and locked. Plan around it.`,
@@ -69,7 +75,10 @@ export default defineAction({
       }
       const problem = validateAgainst(projectSchema(project.schema, working), entry.change);
       if (problem) {
-        fail(`Item ${index + 1} (${describeChange(entry.change)}): ${problem}`, {
+        const already = / already exists\.$/.test(problem)
+          ? " It is already in the schema or the changeset (see get-project-map); build on it instead of adding it again."
+          : "";
+        fail(`Item ${index + 1} (${describeChange(entry.change)}): ${problem}${already}`, {
           errorCode: "invalid_change",
         });
       }
@@ -87,7 +96,7 @@ export default defineAction({
     const added = await insertItems(
       project,
       changeset.id,
-      items.map((entry) => ({ payload: entry.change, reason: entry.reason, origin: "agent" as const })),
+      fresh.map((entry) => ({ payload: entry.change, reason: entry.reason, origin: "agent" as const })),
       await nextPosition(changeset.id, existing),
     );
     const all = [...existing, ...added];
@@ -99,7 +108,9 @@ export default defineAction({
         summary: describeChange(item.payload),
       })),
       sql: migrationSql(compileMigration(all, project.schema)),
-      message: `Added ${added.length} proposed change${added.length === 1 ? "" : "s"} to the changeset.`,
+      message:
+        `Added ${added.length} proposed change${added.length === 1 ? "" : "s"} to the changeset.` +
+        (skipped ? ` Skipped ${skipped} already in it.` : ""),
       nextRequiredAction: "rehearse-migration",
     };
   },
