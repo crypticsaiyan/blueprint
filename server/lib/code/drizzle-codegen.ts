@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import {
   IndentationText,
   Node,
@@ -9,7 +11,7 @@ import {
 } from "ts-morph";
 
 import { activeItems, type ChangeItem, type ColumnSpec } from "../../../shared/changes.js";
-import { readDrizzleTables } from "./typescript-drizzle.js";
+import { DEFAULT_BUILDERS, drizzleBuilders, readDrizzleTables, tableCall, type TableBuilders } from "./typescript-drizzle.js";
 
 const camel = (name: string) => name.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
 
@@ -18,18 +20,45 @@ interface TableRef {
   table: string;
   columns: Record<string, string>;
   decl?: VariableDeclaration;
+  /** How the defining call is spelled: pgTable, createTable, mySchema.table. */
+  builder?: string;
+}
+
+/** A table defined in another schema file of the same repo. */
+export interface ExternalTable {
+  variable: string;
+  table: string;
+  columns: Record<string, string>;
+  /** Import specifier for that file, as seen from the file being edited. */
+  specifier: string;
 }
 
 class Codegen {
   pgCore = new Set<string>();
   needsSql = false;
   tables: TableRef[];
+  /** specifier → variables this file must import for cross-file references. */
+  imports = new Map<string, Set<string>>();
 
-  constructor(private file: SourceFile) {
-    this.tables = readDrizzleTables(file).map((t) => ({
+  /** The file's own string quote, so added lines match the code around them. */
+  private quote: "'" | '"';
+
+  constructor(
+    private file: SourceFile,
+    private external: ExternalTable[] = [],
+    private builders: TableBuilders = DEFAULT_BUILDERS,
+  ) {
+    const first = file.getImportDeclarations()[0]?.getModuleSpecifier().getText()[0];
+    this.quote = first === "'" ? "'" : '"';
+    this.tables = readDrizzleTables(file, builders).map((t) => ({
       ...t,
       decl: file.getVariableDeclarationOrThrow(t.variable),
     }));
+  }
+
+  str(value: string) {
+    if (this.quote === '"') return JSON.stringify(value);
+    return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
   }
 
   find(table: string) {
@@ -37,8 +66,8 @@ class Codegen {
   }
 
   shape(ref: TableRef): ObjectLiteralExpression {
-    const init = ref.decl!.getInitializerOrThrow();
-    if (!Node.isCallExpression(init)) throw new Error(`${ref.variable} is not a pgTable call`);
+    const init = tableCall(ref.decl!.getInitializerOrThrow(), this.builders);
+    if (!init) throw new Error(`${ref.variable} is not a pgTable call`);
     const shape = init.getArguments()[1];
     if (!shape || !Node.isObjectLiteralExpression(shape)) throw new Error(`${ref.variable} has no column object`);
     return shape;
@@ -53,7 +82,7 @@ class Codegen {
 
   builder(column: ColumnSpec): string {
     const type = column.type.toLowerCase().trim();
-    const n = JSON.stringify(column.name);
+    const n = this.str(column.name);
     const use = (fn: string, args = "") => {
       this.pgCore.add(fn);
       return `${fn}(${n}${args})`;
@@ -85,16 +114,18 @@ class Codegen {
     if (/^-?\d+(\.\d+)?$/.test(trimmed)) return `.default(${trimmed})`;
     if (/^(true|false)$/i.test(trimmed)) return `.default(${trimmed.toLowerCase()})`;
     const str = trimmed.match(/^'((?:[^']|'')*)'(::[a-z ]+)?$/i);
-    if (str) return `.default(${JSON.stringify(str[1]!.replace(/''/g, "'"))})`;
+    if (str) return `.default(${this.str(str[1]!.replace(/''/g, "'"))})`;
     this.needsSql = true;
     return `.default(sql\`${trimmed.replace(/`/g, "\\`")}\`)`;
   }
 
   referenceCall(table: string, column: string, onDelete = "no action"): string {
-    const target = this.find(table);
+    const outside = this.find(table) ? undefined : this.external.find((t) => t.table === table);
+    const target = this.find(table) ?? outside;
     if (!target) throw new Error(`Table ${table} is not in the Drizzle schema.`);
+    if (outside) this.imports.set(outside.specifier, (this.imports.get(outside.specifier) ?? new Set()).add(outside.variable));
     const prop = Object.entries(target.columns).find(([, c]) => c === column)?.[0] ?? camel(column);
-    const options = onDelete === "no action" ? "" : `, { onDelete: ${JSON.stringify(onDelete)} }`;
+    const options = onDelete === "no action" ? "" : `, { onDelete: ${this.str(onDelete)} }`;
     return `.references(() => ${target.variable}.${prop}${options})`;
   }
 
@@ -110,8 +141,8 @@ class Codegen {
   }
 
   extraConfig(ref: TableRef, entry: string) {
-    const init = ref.decl!.getInitializerOrThrow();
-    if (!Node.isCallExpression(init)) return;
+    const init = tableCall(ref.decl!.getInitializerOrThrow(), this.builders);
+    if (!init) return;
     const extra = init.getArguments()[2];
     if (!extra) {
       const shape = this.shape(ref);
@@ -133,21 +164,41 @@ class Codegen {
     throw new Error(`Cannot add an index to ${ref.variable}: unsupported extra config shape.`);
   }
 
+  /**
+   * The call a new table should use and the name to pass it: the file's own
+   * creator or schema when it gives the right SQL name, else pgTable.
+   */
+  newTableCall(table: string): { builder: string; name: string } {
+    const bare = table.slice(table.indexOf(".") + 1);
+    const candidates = [table, bare, ...bare.split("_").map((_, i, parts) => parts.slice(i).join("_")).slice(1)];
+    const used = new Map<string, number>();
+    for (const t of this.tables) if (t.builder) used.set(t.builder, (used.get(t.builder) ?? 0) + 1);
+    const order = [...this.builders.keys()].sort((a, b) => (used.get(b) ?? 0) - (used.get(a) ?? 0));
+    for (const builder of order) {
+      const fn = this.builders.get(builder)!;
+      const name = candidates.find((c) => fn(c) === table);
+      if (name !== undefined && (builder === "pgTable" || used.has(builder))) return { builder, name };
+    }
+    if (table.includes(".")) throw new Error(`No pgSchema("${table.split(".")[0]}") in this file for ${table}.`);
+    return { builder: "pgTable", name: table };
+  }
+
   /** Applies one item; text edits invalidate nodes, so callers re-parse after each. */
   apply(item: ChangeItem) {
     const p = item.payload;
     switch (p.kind) {
       case "create_table": {
         if (this.find(p.table)) return;
-        this.pgCore.add("pgTable");
-        const variable = camel(p.table);
+        const call = this.newTableCall(p.table);
+        if (call.builder === "pgTable") this.pgCore.add("pgTable");
+        const variable = camel(call.name);
         const ref: TableRef = { variable, table: p.table, columns: Object.fromEntries(p.columns.map((c) => [camel(c.name), c.name])) };
         this.tables.push(ref);
         void ref;
         const body = p.columns.map((c) => `  ${camel(c.name)}: ${this.columnInit(c)},`).join("\n");
         const firstTable = this.tables[0]?.decl?.getVariableStatementOrThrow();
         const pos = firstTable ? firstTable.getFullStart() : this.file.getEnd();
-        this.file.insertText(pos, `\n\nexport const ${variable} = pgTable(${JSON.stringify(p.table)}, {\n${body}\n});`);
+        this.file.insertText(pos, `\n\nexport const ${variable} = ${call.builder}(${this.str(call.name)}, {\n${body}\n});`);
         return;
       }
       case "add_column": {
@@ -201,7 +252,7 @@ class Codegen {
           return `sql\`lower(\${t.${prop}})\``;
         });
         const name = `${p.table}_${p.columns.join("_")}_${p.caseInsensitive ? "lower_" : ""}key`.slice(0, 63);
-        this.extraConfig(ref, `uniqueIndex(${JSON.stringify(name)}).on(${cols.join(", ")})`);
+        this.extraConfig(ref, `uniqueIndex(${this.str(name)}).on(${cols.join(", ")})`);
         return;
       }
       case "add_index": {
@@ -209,7 +260,7 @@ class Codegen {
         if (!ref) throw new Error(`Table ${p.table} is not in the Drizzle schema.`);
         this.pgCore.add("index");
         const cols = p.columns.map((c) => `t.${Object.entries(ref.columns).find(([, col]) => col === c)?.[0] ?? camel(c)}`);
-        this.extraConfig(ref, `index(${JSON.stringify(`${p.table}_${p.columns.join("_")}_idx`.slice(0, 63))}).on(${cols.join(", ")})`);
+        this.extraConfig(ref, `index(${this.str(`${p.table}_${p.columns.join("_")}_idx`.slice(0, 63))}).on(${cols.join(", ")})`);
         return;
       }
       case "backfill":
@@ -235,6 +286,14 @@ class Codegen {
       pgImport.addNamedImports(missing);
     } else if (!pgImport && missing.length) {
       this.file.insertImportDeclaration(0, { moduleSpecifier: "drizzle-orm/pg-core", namedImports: missing });
+    }
+    for (const [specifier, names] of this.imports) {
+      const existing = this.file.getImportDeclaration((d) => d.getModuleSpecifierValue() === specifier);
+      const have = new Set(existing?.getNamedImports().map((n) => n.getName()) ?? []);
+      const add = [...names].filter((n) => !have.has(n) && !this.tables.some((t) => t.variable === n)).sort();
+      if (!add.length) continue;
+      if (existing) existing.addNamedImports(add);
+      else this.file.insertImportDeclaration(this.file.getImportDeclarations().length, { moduleSpecifier: specifier, namedImports: add });
     }
     if (this.needsSql) {
       const orm = this.file.getImportDeclaration((d) => d.getModuleSpecifierValue() === "drizzle-orm");
@@ -270,10 +329,16 @@ function removeCall(text: string, marker: string) {
  * Applies a changeset to a Drizzle schema file, so the ORM matches the
  * migrated database. Deterministic: same baseline + items, same output.
  */
-export function generateDrizzleSchema(source: string, items: ChangeItem[]): string {
+export function generateDrizzleSchema(
+  source: string,
+  items: ChangeItem[],
+  external: ExternalTable[] = [],
+  builders: TableBuilders = DEFAULT_BUILDERS,
+): string {
+  const single = /^\s*import\b[^;]*?from\s+'/m.test(source);
   const project = new Project({
     useInMemoryFileSystem: true,
-    manipulationSettings: { indentationText: IndentationText.TwoSpaces, quoteKind: QuoteKind.Double },
+    manipulationSettings: { indentationText: IndentationText.TwoSpaces, quoteKind: single ? QuoteKind.Single : QuoteKind.Double },
   });
   const ordered = [...activeItems(items)].sort((a, b) => a.position - b.position);
   // Tables first, so later items can reference them.
@@ -282,20 +347,78 @@ export function generateDrizzleSchema(source: string, items: ChangeItem[]): stri
     ...ordered.filter((i) => i.payload.kind !== "create_table"),
   ];
   const pgCore = new Set<string>();
+  const imports = new Map<string, Set<string>>();
   let needsSql = false;
   let text = source;
   for (const item of sequence) {
     const file = project.createSourceFile("schema.ts", text, { overwrite: true });
-    const gen = new Codegen(file);
+    const gen = new Codegen(file, external, builders);
     gen.apply(item);
     gen.pgCore.forEach((n) => pgCore.add(n));
+    for (const [spec, names] of gen.imports) names.forEach((n) => imports.set(spec, (imports.get(spec) ?? new Set()).add(n)));
     needsSql ||= gen.needsSql;
     text = file.getFullText();
   }
   const file = project.createSourceFile("schema.ts", text, { overwrite: true });
-  const gen = new Codegen(file);
+  const gen = new Codegen(file, external, builders);
   gen.pgCore = pgCore;
+  gen.imports = imports;
   gen.needsSql = needsSql;
   gen.fixImports();
   return file.getFullText();
+}
+
+function tableOf(item: ChangeItem): string {
+  return item.payload.table;
+}
+
+/**
+ * Applies a changeset to a schema split across files: each change goes to the
+ * file that defines its table, and new tables join the file of a table they
+ * reference (or the main schema file). Returns only the files that change.
+ */
+export function generateDrizzleSchemaFiles(
+  files: Map<string, string>,
+  items: ChangeItem[],
+  primary: string,
+  knownTables: readonly string[] = [],
+): Map<string, string> {
+  const project = new Project({ useInMemoryFileSystem: true });
+  const defined: (ExternalTable & { file: string })[] = [];
+  const parsed = [...files].map(([rel, text]) => [rel, project.createSourceFile(`/${rel}`, text, { overwrite: true })] as const);
+  const builders = drizzleBuilders(parsed.map(([, f]) => f), knownTables);
+  for (const [rel, file] of parsed) {
+    for (const t of readDrizzleTables(file, builders)) defined.push({ variable: t.variable, table: t.table, columns: t.columns, file: rel, specifier: "" });
+  }
+  const owner = new Map(defined.map((t) => [t.table, t.file]));
+  const active = [...activeItems(items)].sort((a, b) => a.position - b.position);
+  for (const item of active) {
+    const p = item.payload;
+    if (p.kind !== "create_table" || owner.has(p.table)) continue;
+    const parent = p.columns.map((c) => c.references?.table).find((t) => t && owner.has(t));
+    const home = parent ? owner.get(parent)! : primary;
+    owner.set(p.table, home);
+    defined.push({ variable: camel(p.table), table: p.table, columns: Object.fromEntries(p.columns.map((c) => [camel(c.name), c.name])), file: home, specifier: "" });
+  }
+  const byFile = new Map<string, ChangeItem[]>();
+  for (const item of items) {
+    const file = owner.get(tableOf(item)) ?? primary;
+    byFile.set(file, [...(byFile.get(file) ?? []), item]);
+  }
+  const out = new Map<string, string>();
+  for (const [rel, fileItems] of byFile) {
+    const source = files.get(rel);
+    if (source === undefined) continue;
+    const usesJs = /from\s+["']\.{1,2}\/[^"']+\.js["']/.test(source);
+    const external = defined
+      .filter((t) => t.file !== rel)
+      .map((t) => {
+        let spec = path.posix.relative(path.posix.dirname(rel), t.file).replace(/\.(ts|tsx|mts|js)$/, "");
+        if (!spec.startsWith(".")) spec = `./${spec}`;
+        return { variable: t.variable, table: t.table, columns: t.columns, specifier: usesJs ? `${spec}.js` : spec };
+      });
+    const next = generateDrizzleSchema(source, fileItems, external, builders);
+    if (next !== source) out.set(rel, next);
+  }
+  return out;
 }

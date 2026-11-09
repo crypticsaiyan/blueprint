@@ -3,8 +3,8 @@ import { z } from "zod";
 
 import {
   describeChange,
-  identifier,
   projectSchema,
+  tableName,
   type ChangePayload,
 } from "../shared/changes.js";
 import { changeItemOutput } from "../server/lib/output-schemas.js";
@@ -21,7 +21,7 @@ export default defineAction({
     "Create a new table drawn on the canvas. It starts as a ghost with an id primary key and created_at; then fill likely columns by editing the item with update-change-item.",
   schema: z.object({
     projectId: z.string().describe("Project id"),
-    name: identifier.describe("New table name, snake_case plural, e.g. orgs"),
+    name: tableName.describe("New table name in the schema's existing style, e.g. orgs; schema.table outside public"),
     x: z.number().default(0).describe("Canvas x position"),
     y: z.number().default(0).describe("Canvas y position"),
   }),

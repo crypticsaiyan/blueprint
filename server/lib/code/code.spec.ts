@@ -9,7 +9,7 @@ import { computeImpact } from "../../../shared/impact";
 import { findViolations } from "../../../shared/rules";
 import { introspect } from "../introspect";
 import { loadDump } from "../sandbox";
-import { generateDrizzleSchema } from "./drizzle-codegen";
+import { generateDrizzleSchema, generateDrizzleSchemaFiles } from "./drizzle-codegen";
 import { analyzeCode } from "./index";
 
 const DEMO = path.resolve(__dirname, "../../../demo-repo");
@@ -100,5 +100,34 @@ describe("Drizzle schema codegen", () => {
   it("is a no-op without schema changes", () => {
     const source = readFileSync(path.join(DEMO, "src/db/schema.ts"), "utf8");
     expect(generateDrizzleSchema(source, [item({ kind: "backfill", table: "users", sql: "select 1" })])).toBe(source);
+  });
+
+  it("uses the repo's pgTableCreator and pgSchema for tables", () => {
+    const source = `import { pgSchema, pgTableCreator, text } from "drizzle-orm/pg-core";
+
+export const createTable = pgTableCreator((name) => \`app_\${name}\`);
+const billing = pgSchema("billing");
+
+export const posts = createTable("posts", {
+  id: text("id").primaryKey(),
+});
+
+export const invoices = billing.table("invoices", {
+  id: text("id").primaryKey(),
+});
+`;
+    const out = generateDrizzleSchemaFiles(
+      new Map([["src/server/db/schema.ts", source]]),
+      [
+        item({ kind: "add_column", table: "app_posts", column: { name: "title", type: "text" } }),
+        item({ kind: "add_column", table: "billing.invoices", column: { name: "total", type: "integer" } }),
+        item({ kind: "create_table", table: "app_tags", columns: [{ name: "id", type: "text", primaryKey: true }] }),
+      ],
+      "src/server/db/schema.ts",
+    ).get("src/server/db/schema.ts")!;
+    expect(out).toContain('export const tags = createTable("tags", {');
+    expect(out).toMatch(/createTable\("posts", \{\n {2}id: text\("id"\)\.primaryKey\(\),\n {2}title: text\("title"\),/);
+    expect(out).toMatch(/billing\.table\("invoices", \{\n {2}id: text\("id"\)\.primaryKey\(\),\n {2}total: integer\("total"\),/);
+    expect(out).not.toContain("pgTable(");
   });
 });

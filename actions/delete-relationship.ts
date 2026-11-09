@@ -2,7 +2,7 @@ import { defineAction, fail } from "@agent-native/core/action";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { describeChange, identifier, projectSchema, q } from "../shared/changes.js";
+import { describeChange, identifier, projectSchema, q, qt, tableName } from "../shared/changes.js";
 import { getDb, schema } from "../server/db/index.js";
 import {
   insertItems,
@@ -20,9 +20,9 @@ export default defineAction({
     "Delete a relationship (foreign key) between two tables. With confirm false (default) it changes nothing and returns the dependent rows; with confirm true it adds a drop_foreign_key change, or rejects the proposal that introduced a ghost relationship.",
   schema: z.object({
     projectId: z.string().describe("Project id"),
-    table: identifier.describe("Child table holding the foreign key"),
+    table: tableName.describe("Child table holding the foreign key"),
     column: identifier.describe("Foreign key column"),
-    refTable: identifier.describe("Parent table"),
+    refTable: tableName.describe("Parent table"),
     confirm: z.boolean().default(false).describe("false to preview impact only; true to add the change"),
   }),
   outputSchema: z.object({
@@ -66,10 +66,10 @@ export default defineAction({
 
     const pg = await sourceDb(project.id, project.dumpPath);
     const counts = await pg.query<{ linked: number; total: number }>(
-      `SELECT count(${q(column)})::int AS linked, count(*)::int AS total FROM ${q(table)}`,
+      `SELECT count(${q(column)})::int AS linked, count(*)::int AS total FROM ${qt(table)}`,
     );
     const sample = await pg.query<Record<string, unknown>>(
-      `SELECT * FROM ${q(table)} WHERE ${q(column)} IS NOT NULL LIMIT 5`,
+      `SELECT * FROM ${qt(table)} WHERE ${q(column)} IS NOT NULL LIMIT 5`,
     );
     const linked = counts.rows[0]?.linked ?? 0;
     const total = counts.rows[0]?.total ?? 0;

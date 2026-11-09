@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   backfillSqlForPath,
+  bareTable,
   compileMigration,
   describeChange,
   findBackfillPath,
@@ -10,6 +11,7 @@ import {
   migrationSql,
   primaryKeyColumn,
   projectSchema,
+  tableName,
   type ChangePayload,
 } from "../shared/changes.js";
 import { changeItemOutput } from "../server/lib/output-schemas.js";
@@ -34,8 +36,8 @@ export default defineAction({
     "Draw a relationship: every row of fromTable belongs to a row of toTable. Proposes the foreign-key column, a backfill that follows existing foreign keys when a path exists, and the constraint, then dry-runs the plan on the sample data and reports how many rows the backfill fills.",
   schema: z.object({
     projectId: z.string().describe("Project id"),
-    fromTable: identifier.describe("Child table that gets the foreign key, e.g. invoices"),
-    toTable: identifier.describe("Parent table it points at, e.g. orgs"),
+    fromTable: tableName.describe("Child table that gets the foreign key, e.g. invoices"),
+    toTable: tableName.describe("Parent table it points at, e.g. orgs"),
     column: identifier.optional().describe("Foreign key column; defaults to <singular toTable>_id"),
   }),
   outputSchema: z.object({
@@ -64,7 +66,7 @@ export default defineAction({
     const refType = to.columns.find((c) => c.name === refColumn)?.type;
     if (!refColumn || !refType) fail(`${toTable} has no single-column primary key.`, { errorCode: "no_primary_key" });
 
-    const fkColumn = column ?? `${singular(toTable)}_id`;
+    const fkColumn = column ?? `${singular(bareTable(toTable))}_id`;
     const already = projected.edges.find(
       (e) => e.table === fromTable && e.column === fkColumn && e.refTable === toTable && !e.dropped,
     );

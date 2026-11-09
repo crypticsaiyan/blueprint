@@ -7,6 +7,7 @@ import {
   type ChangeItem,
   type ProjectedSchema,
 } from "../../shared/changes.js";
+import { COMPACT_TABLES } from "../../shared/map-layout.js";
 import type { SchemaSnapshot } from "../../shared/schema-types.js";
 import { getDb, schema } from "../db/index.js";
 
@@ -165,13 +166,20 @@ export async function touchChangeset(changesetId: string) {
  * Lays tables out in layers by foreign-key depth, parents left of children,
  * so the map reads like the data model.
  */
+/** Rows a compact table card shows: its key and any proposed columns. */
+const compactRows = (table: { primaryKey: string[] }) => Math.max(1, table.primaryKey.length) + 1;
+
+/**
+ * Lays tables out left to right by foreign-key depth: parents in earlier
+ * columns. Large schemas use compact card heights and wrap each depth into
+ * several columns, so the map stays wide rather than one tall strip.
+ */
 export function layoutTables(snapshot: SchemaSnapshot) {
+  const byName = new Map(snapshot.tables.map((t) => [t.name, t]));
+  const compact = snapshot.tables.length > COMPACT_TABLES;
   const depth = new Map<string, number>();
   const parents = (name: string) =>
-    snapshot.tables
-      .find((t) => t.name === name)
-      ?.foreignKeys.map((fk) => fk.refTable)
-      .filter((ref) => ref !== name) ?? [];
+    byName.get(name)?.foreignKeys.map((fk) => fk.refTable).filter((ref) => ref !== name && byName.has(ref)) ?? [];
   const visit = (name: string, trail: Set<string>): number => {
     if (depth.has(name)) return depth.get(name)!;
     if (trail.has(name)) return 0;
@@ -185,18 +193,29 @@ export function layoutTables(snapshot: SchemaSnapshot) {
   const layers = new Map<number, string[]>();
   for (const [name, d] of depth) layers.set(d, [...(layers.get(d) ?? []), name]);
   const positions = new Map<string, { x: number; y: number }>();
-  // Left to right: parents in earlier columns. Heights follow column counts.
   const COL = 300;
-  const GAP = 48;
-  const height = (name: string) =>
-    44 + 19 * (snapshot.tables.find((t) => t.name === name)?.columns.length ?? 4);
-  for (const [d, names] of layers) {
-    names.sort();
-    const total = names.reduce((sum, n) => sum + height(n), 0) + GAP * (names.length - 1);
-    let y = -total / 2;
-    for (const name of names) {
-      positions.set(name, { x: d * COL, y: Math.round(y) });
-      y += height(name) + GAP;
+  const GAP = compact ? 28 : 48;
+  const height = (name: string) => {
+    const table = byName.get(name);
+    return 44 + 19 * (compact && table ? compactRows(table) : (table?.columns.length ?? 4));
+  };
+  // Tables sharing a parent sit together within their column.
+  const firstParent = (name: string) => parents(name).sort()[0] ?? "";
+  // Columns tall enough that the whole map is about as wide as it is tall
+  // (cards are ~300 wide, ~110 tall), which is the canvas's own shape.
+  const perColumn = compact ? Math.max(6, Math.ceil(Math.sqrt(snapshot.tables.length / 0.44))) : Infinity;
+  let x = 0;
+  for (const d of [...layers.keys()].sort((a, b) => a - b)) {
+    const names = layers.get(d)!.sort((a, b) => firstParent(a).localeCompare(firstParent(b)) || a.localeCompare(b));
+    for (let start = 0; start < names.length; start += perColumn) {
+      const column = names.slice(start, start + perColumn);
+      const total = column.reduce((sum, n) => sum + height(n), 0) + GAP * (column.length - 1);
+      let y = -total / 2;
+      for (const name of column) {
+        positions.set(name, { x, y: Math.round(y) });
+        y += height(name) + GAP;
+      }
+      x += COL;
     }
   }
   return positions;

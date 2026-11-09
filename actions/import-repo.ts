@@ -1,20 +1,19 @@
 import { defineAction, fail } from "@agent-native/core/action";
 import { buildDeepLink } from "@agent-native/core/server";
-import path from "node:path";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import {
   cloneRepo,
   DEMO_REPO_PATH,
-  findDump,
   parseGithubUrl,
   removeCheckout,
 } from "../server/lib/import.js";
+import { describeSource, findSchemaSource, materializeSource, type SchemaSource } from "../server/lib/schema-source.js";
 import { introspect } from "../server/lib/introspect.js";
 import { analyzeCode } from "../server/lib/code/index.js";
 import { layoutModules, layoutTables, nowIso } from "../server/lib/projects.js";
-import { loadDump } from "../server/lib/sandbox.js";
+import { loadDump, loadReport, type LoadReport } from "../server/lib/sandbox.js";
 
 export default defineAction({
   description:
@@ -31,7 +30,9 @@ export default defineAction({
     dumpPath: z
       .string()
       .optional()
-      .describe("Path to the SQL dump inside the repo; found automatically when omitted"),
+      .describe(
+        "Path inside the repo to a SQL dump or a folder of SQL migrations; found automatically when omitted",
+      ),
   }),
   outputSchema: z.object({
     id: z.string(),
@@ -67,23 +68,27 @@ export default defineAction({
       name = parsed.repo;
       repoUrl = `https://github.com/${parsed.owner}/${parsed.repo}`;
     }
+    let source: SchemaSource;
     let dumpPath: string;
     try {
-      dumpPath = await findDump(repoPath, args.dumpPath);
+      source = await findSchemaSource(repoPath, args.dumpPath);
+      dumpPath = await materializeSource(id, repoPath, source);
     } catch (error) {
       if (args.source === "github") await removeCheckout(repoPath);
       throw error;
     }
 
     let snapshot;
+    let report: LoadReport | undefined;
     try {
       const pg = await loadDump(dumpPath);
+      report = loadReport(pg);
       snapshot = await introspect(pg);
       await pg.close();
     } catch (error) {
       if (args.source === "github") await removeCheckout(repoPath);
       fail(
-        `The dump at ${path.relative(repoPath, dumpPath)} did not load into Postgres: ${(error as Error).message}`,
+        `The database from ${describeSource(repoPath, source)} did not load into Postgres: ${(error as Error).message}`,
         { errorCode: "dump_invalid" },
       );
     }
@@ -137,7 +142,10 @@ export default defineAction({
       );
     }
     const usageEdges = new Map<string, "reads" | "writes">();
+    const tableNames = new Set(snapshot.tables.map((t) => t.name));
     for (const usage of code.usages) {
+      // Code can query a table the sandbox could not load (a skipped extension).
+      if (!tableNames.has(usage.table)) continue;
       const key = `${usage.module}\u0000${usage.table}`;
       if (usage.kind === "write" || !usageEdges.has(key)) {
         usageEdges.set(key, usage.kind === "write" ? "writes" : "reads");
@@ -174,7 +182,21 @@ export default defineAction({
       name,
       tables: snapshot.tables.length,
       rows,
-      message: `Imported ${name}: ${snapshot.tables.length} tables, ${rows} rows of sample data, ${code.usages.length} queries in ${code.modules.length} modules${code.approximate ? " (approximate text search)" : ""}.`,
+      message: `Imported ${name}: ${snapshot.tables.length} tables from ${describeSource(repoPath, source)}, ${rows ? `${rows} row${rows === 1 ? "" : "s"} of sample data` : "no sample data (rehearsals check the schema only)"}, ${code.usages.length} queries in ${code.modules.length} modules${code.approximate ? ADAPTER_NOTE[code.adapter] : ""}.${skippedNote(report)}`,
     };
   },
 });
+
+/** Says what the sandbox left out because PGlite lacks an extension. */
+function skippedNote(report: LoadReport | undefined) {
+  if (!report) return "";
+  const ext = report.missing.join(", ");
+  const tables = report.skippedTables.length ? ` (tables not loaded: ${report.skippedTables.slice(0, 8).join(", ")}${report.skippedTables.length > 8 ? ", ..." : ""})` : "";
+  return ` The sandbox has no ${ext} extension, so ${report.skipped} statements could not run and were skipped${tables}; changes to those parts cannot be rehearsed.`;
+}
+
+const ADAPTER_NOTE: Record<string, string> = {
+  prisma: " (Prisma calls, matched by pattern)",
+  "supabase-js": " (supabase-js calls, matched by pattern)",
+  "text-search": " (approximate text search)",
+};

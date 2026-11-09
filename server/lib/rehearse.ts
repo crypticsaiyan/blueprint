@@ -3,6 +3,7 @@ import type { PGliteInterface } from "@electric-sql/pglite";
 import {
   compileMigration,
   q,
+  qt,
   type ChangeItem,
   type MigrationStep,
   type StepCheck,
@@ -102,9 +103,19 @@ function rowKey(table: TableInfo | undefined, row: Row): string | null {
   return table.primaryKey.map((c) => String(row[c])).join("|");
 }
 
+function uniqueParts(check: Extract<StepCheck, { type: "unique" }>) {
+  return check.columns.map((c) => (check.caseInsensitive ? `lower(${q(c)}::text)` : q(c)));
+}
+
+/** The key as one value: a column, or a row (a, b) to compare against a subquery. */
 function uniqueExpr(check: Extract<StepCheck, { type: "unique" }>) {
-  const parts = check.columns.map((c) => (check.caseInsensitive ? `lower(${q(c)}::text)` : q(c)));
-  return parts.length === 1 ? parts[0] : `(${parts.join(", ")})`;
+  const parts = uniqueParts(check);
+  return parts.length === 1 ? parts[0]! : `(${parts.join(", ")})`;
+}
+
+/** The key as a column list, for SELECT, GROUP BY and PARTITION BY. */
+function uniqueList(check: Extract<StepCheck, { type: "unique" }>) {
+  return uniqueParts(check).join(", ");
 }
 
 function conflictWhere(check: StepCheck): string {
@@ -112,11 +123,12 @@ function conflictWhere(check: StepCheck): string {
     case "not_null":
       return `${q(check.column)} IS NULL`;
     case "foreign_key":
-      return `${q(check.column)} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ${q(check.refTable)} p WHERE p.${q(check.refColumn)} = ${q(check.table)}.${q(check.column)})`;
+      return `${q(check.column)} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ${qt(check.refTable)} p WHERE p.${q(check.refColumn)} = ${qt(check.table)}.${q(check.column)})`;
     case "unique": {
       const expr = uniqueExpr(check);
       const notNull = check.columns.map((c) => `${q(c)} IS NOT NULL`).join(" AND ");
-      return `${notNull} AND ${expr} IN (SELECT ${expr} FROM ${q(check.table)} GROUP BY ${expr} HAVING count(*) > 1)`;
+      const list = uniqueList(check);
+      return `${notNull} AND ${expr} IN (SELECT ${list} FROM ${qt(check.table)} GROUP BY ${list} HAVING count(*) > 1)`;
     }
   }
 }
@@ -167,18 +179,18 @@ async function detectConflict(
   if (check.type === "foreign_key" && !live.tables.some((t) => t.name === check.refTable)) return null;
   const where = conflictWhere(check);
   const count = await pg.query<{ n: number }>(
-    `SELECT count(*)::int AS n FROM ${q(check.table)} WHERE ${where}`,
+    `SELECT count(*)::int AS n FROM ${qt(check.table)} WHERE ${where}`,
   );
   const rowCount = count.rows[0]?.n ?? 0;
   if (rowCount === 0) return null;
   const sample = await pg.query<Row>(
-    `SELECT * FROM ${q(check.table)} WHERE ${where} ORDER BY ${check.type === "unique" ? `${uniqueExpr(check)}, ` : ""}${orderClause(table)} LIMIT 50`,
+    `SELECT * FROM ${qt(check.table)} WHERE ${where} ORDER BY ${check.type === "unique" ? `${uniqueList(check)}, ` : ""}${orderClause(table)} LIMIT 50`,
   );
   const kind = kindFor(check);
   let groups: number | undefined;
   if (check.type === "unique") {
     const g = await pg.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM (SELECT 1 FROM ${q(check.table)} WHERE ${where} GROUP BY ${uniqueExpr(check)}) g`,
+      `SELECT count(*)::int AS n FROM (SELECT 1 FROM ${qt(check.table)} WHERE ${where} GROUP BY ${uniqueList(check)}) g`,
     );
     groups = g.rows[0]?.n ?? 0;
   }
@@ -234,14 +246,14 @@ async function deleteCascading(
     await deleteCascading(
       rec,
       ref.table,
-      `${q(ref.column)} IN (SELECT ${q(ref.refColumn)} FROM ${q(table)} WHERE ${where})`,
+      `${q(ref.column)} IN (SELECT ${q(ref.refColumn)} FROM ${qt(table)} WHERE ${where})`,
       live,
       planned,
       counts,
       depth + 1,
     );
   }
-  const result = await rec.run(`DELETE FROM ${q(table)} WHERE ${where}`);
+  const result = await rec.run(`DELETE FROM ${qt(table)} WHERE ${where}`);
   counts[table] = (counts[table] ?? 0) + (result.affectedRows ?? 0);
 }
 
@@ -270,7 +282,7 @@ async function applyFix(
         throw new Error("This fix needs a value.");
       }
       const result = await rec.run(
-        `UPDATE ${q(check.table)} SET ${q(check.column)} = ${literal(resolution.value)} WHERE ${where}`,
+        `UPDATE ${qt(check.table)} SET ${q(check.column)} = ${literal(resolution.value)} WHERE ${where}`,
       );
       return done(result.affectedRows ?? 0, `Filled ${result.affectedRows ?? 0} ${check.table}.${check.column} with ${JSON.stringify(resolution.value)}`);
     }
@@ -282,7 +294,7 @@ async function applyFix(
     }
     case "set_null": {
       if (check.type !== "foreign_key") break;
-      const result = await rec.run(`UPDATE ${q(check.table)} SET ${q(check.column)} = NULL WHERE ${where}`);
+      const result = await rec.run(`UPDATE ${qt(check.table)} SET ${q(check.column)} = NULL WHERE ${where}`);
       return done(result.affectedRows ?? 0, `Cleared ${result.affectedRows ?? 0} ${check.table}.${check.column}`);
     }
     case "merge_duplicates": {
@@ -293,19 +305,19 @@ async function applyFix(
       // Set-based so the same statements run unchanged against production.
       await rec.run(
         `CREATE TEMP TABLE blueprint_merge AS
-         SELECT ${pk} AS dupe, first_value(${pk}) OVER (PARTITION BY ${uniqueExpr(check)} ORDER BY ${orderClause(table)}) AS keep
-         FROM ${q(check.table)} WHERE ${where}`,
+         SELECT ${pk} AS dupe, first_value(${pk}) OVER (PARTITION BY ${uniqueList(check)} ORDER BY ${orderClause(table)}) AS keep
+         FROM ${qt(check.table)} WHERE ${where}`,
       );
       await rec.run(`DELETE FROM blueprint_merge WHERE dupe = keep`);
       const counts: Record<string, number> = {};
       for (const ref of referencesTo(check.table, live, planned)) {
         const moved = await rec.run(
-          `UPDATE ${q(ref.table)} r SET ${q(ref.column)} = m.keep FROM blueprint_merge m WHERE r.${q(ref.column)} = m.dupe`,
+          `UPDATE ${qt(ref.table)} r SET ${q(ref.column)} = m.keep FROM blueprint_merge m WHERE r.${q(ref.column)} = m.dupe`,
         );
         counts[ref.table] = (counts[ref.table] ?? 0) + (moved.affectedRows ?? 0);
       }
       const keepers = await pg.query<{ n: number }>(`SELECT count(DISTINCT keep)::int AS n FROM blueprint_merge`);
-      const deleted = await rec.run(`DELETE FROM ${q(check.table)} t USING blueprint_merge m WHERE t.${pk} = m.dupe`);
+      const deleted = await rec.run(`DELETE FROM ${qt(check.table)} t USING blueprint_merge m WHERE t.${pk} = m.dupe`);
       await rec.run(`DROP TABLE blueprint_merge`);
       const removed = deleted.affectedRows ?? 0;
       return done(removed, `Merged ${removed} duplicate ${check.table} into ${keepers.rows[0]?.n ?? 0}; ${describeCounts("repointed", counts)}`);
@@ -317,13 +329,13 @@ async function applyFix(
       const col = q(check.columns[0]!);
       const pkMatch = table.primaryKey.map((c) => `t.${q(c)} = d.${q(c)}`).join(" AND ");
       const result = await rec.run(
-        `UPDATE ${q(check.table)} t
+        `UPDATE ${qt(check.table)} t
          SET ${col} = CASE WHEN t.${col}::text LIKE '%@%'
            THEN split_part(t.${col}::text, '@', 1) || '+dup' || (d.rn - 1) || '@' || split_part(t.${col}::text, '@', 2)
            ELSE t.${col}::text || '-' || d.rn END
          FROM (SELECT ${table.primaryKey.map(q).join(", ")},
-                      row_number() OVER (PARTITION BY ${uniqueExpr(check)} ORDER BY ${orderClause(table)}) AS rn
-               FROM ${q(check.table)} WHERE ${where}) d
+                      row_number() OVER (PARTITION BY ${uniqueList(check)} ORDER BY ${orderClause(table)}) AS rn
+               FROM ${qt(check.table)} WHERE ${where}) d
          WHERE ${pkMatch} AND d.rn > 1`,
       );
       return done(result.affectedRows ?? 0, `Renamed ${result.affectedRows ?? 0} duplicate ${check.table}.${check.columns[0]}`);
@@ -337,7 +349,7 @@ async function captureRows(pg: Queryable, snapshot: SchemaSnapshot) {
   for (const table of snapshot.tables) {
     if (table.primaryKey.length === 0) continue;
     const result = await pg.query<Row>(
-      `SELECT * FROM ${q(table.name)} ORDER BY ${table.primaryKey.map(q).join(", ")} LIMIT ${ROW_CAPTURE_LIMIT}`,
+      `SELECT * FROM ${qt(table.name)} ORDER BY ${table.primaryKey.map(q).join(", ")} LIMIT ${ROW_CAPTURE_LIMIT}`,
     );
     const rows = new Map<string, Row>();
     for (const row of result.rows) rows.set(rowKey(table, row)!, row);
@@ -501,7 +513,7 @@ export async function rehearse(options: {
       ?.columns.some((c) => c.name === column);
     if (exists) {
       const m = await pg.query<{ total: number; filled: number }>(
-        `SELECT count(*)::int AS total, count(${q(column)})::int AS filled FROM ${q(table)}`,
+        `SELECT count(*)::int AS total, count(${q(column)})::int AS filled FROM ${qt(table)}`,
       );
       const row = m.rows[0] ?? { total: 0, filled: 0 };
       measured = { table, column, total: row.total, filled: row.filled, empty: row.total - row.filled };

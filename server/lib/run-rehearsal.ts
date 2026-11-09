@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { and, eq, isNotNull } from "drizzle-orm";
 
 import { compileMigration, shippableMigrationSql, type ChangeItem } from "../../shared/changes.js";
@@ -5,8 +7,9 @@ import type { FixId, RehearsalResult, Resolution } from "../../shared/rehearsal-
 import { getDb, schema } from "../db/index.js";
 import { nowIso, scopeOf, type ProjectRow } from "./projects.js";
 import { dumpDatabase } from "./dump.js";
+import { canRegenerate, patchDump } from "./dump-patch.js";
 import { rehearse } from "./rehearse.js";
-import { cloneSource } from "./sandbox.js";
+import { cloneSource, sourceDb } from "./sandbox.js";
 
 export async function savedResolutions(changesetId: string): Promise<Resolution[]> {
   const rows = await getDb()
@@ -38,6 +41,13 @@ export async function migratedDump(project: ProjectRow, changesetId: string, ite
   try {
     const result = await rehearse({ pg, items, snapshot: project.schema, resolutions: await savedResolutions(changesetId) });
     if (result.status !== "passed") return { result, dump: null };
+    // Edit the repo's dump in place so the diff shows only migrated rows;
+    // write a fresh one when its shape is beyond a safe edit.
+    const original = await readFile(project.dumpPath, "utf8");
+    const patched = await patchDump(original, await sourceDb(project.id, project.dumpPath), pg);
+    if (patched) return { result, dump: patched };
+    // A fresh dump would drop what the file holds beyond tables and rows.
+    if (!canRegenerate(original)) return { result, dump: null };
     return { result, dump: await dumpDatabase(pg, `${project.name} sample data, migrated by Blueprint`) };
   } finally {
     await pg.close();

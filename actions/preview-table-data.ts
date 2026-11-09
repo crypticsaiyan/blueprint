@@ -1,8 +1,7 @@
 import { defineAction, fail } from "@agent-native/core/action";
 import { z } from "zod";
 
-import { q } from "../shared/changes.js";
-import { identifier } from "../shared/changes.js";
+import { q, qt, tableName } from "../shared/changes.js";
 import { requireProject } from "../server/lib/projects.js";
 import { sourceDb } from "../server/lib/sandbox.js";
 
@@ -11,7 +10,7 @@ export default defineAction({
     "Read sample rows from one table of a project's sample database (read-only). Use it to check real values before proposing a backfill or a constraint.",
   schema: z.object({
     projectId: z.string().describe("Project id"),
-    table: identifier.describe("Table name"),
+    table: tableName.describe("Table name; schema.table outside public"),
     limit: z.coerce
       .number()
       .int()
@@ -35,7 +34,7 @@ export default defineAction({
     const pg = await sourceDb(project.id, project.dumpPath);
     const order = info.primaryKey.length ? ` ORDER BY ${info.primaryKey.map(q).join(", ")}` : "";
     const rows = await pg.query<Record<string, unknown>>(
-      `SELECT * FROM ${q(table)}${order} LIMIT ${limit}`,
+      `SELECT * FROM ${qt(table)}${order} LIMIT ${limit}`,
     );
     return {
       table,

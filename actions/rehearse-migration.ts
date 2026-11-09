@@ -64,7 +64,7 @@ export default defineAction({
       })),
       message:
         result.status === "passed"
-          ? `Rehearsal passed in ${result.durationMs} ms: ${result.steps.length} steps ran on the sample data.`
+          ? `Rehearsal passed in ${result.durationMs} ms: ${result.steps.length} steps ran ${project.schema.tables.some((t) => t.rowCount > 0) ? "on the sample data" : "on the schema (the repo has no sample data, so data conflicts cannot show up)"}.`
           : result.status === "conflicts"
             ? `Rehearsal found ${open.length} conflict${open.length === 1 ? "" : "s"} in the sample data.`
             : `Rehearsal failed: ${result.steps.find((s) => s.status === "error")?.error ?? "a step errored"}.`,

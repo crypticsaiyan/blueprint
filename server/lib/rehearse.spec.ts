@@ -75,6 +75,19 @@ describe("rehearse on the demo data", () => {
   }, 60_000);
 });
 
+describe("multi-column checks", () => {
+  it("finds and merges duplicates on a unique across two columns", async () => {
+    const unique = item({ kind: "add_unique", table: "invoice_items", columns: ["invoice_id", "description"] });
+    const first = await run([unique]);
+    expect(first.status).toBe("conflicts");
+    const conflict = first.conflicts[0]!;
+    expect(conflict.kind).toBe("duplicates");
+    expect(conflict.rowKeys).toEqual(expect.arrayContaining(["itm_33_1", "itm_33_2"]));
+    const fixed = await run([unique], [{ key: conflict.key, fix: "merge_duplicates" }]);
+    expect(fixed.status).toBe("passed");
+  }, 60_000);
+});
+
 describe("shipping", () => {
   it("replays the migration with its recorded fixes on a fresh copy, and dumps a loadable database", async () => {
     const { compileMigration, shippableMigrationSql } = await import("../../shared/changes");

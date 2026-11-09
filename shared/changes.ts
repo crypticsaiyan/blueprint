@@ -2,7 +2,9 @@ import { z } from "zod";
 
 import type { ColumnInfo, SchemaSnapshot, TableInfo } from "./schema-types";
 
-const IDENT = /^[a-z_][a-z0-9_]{0,62}$/;
+// Any plain Postgres identifier: real schemas use snake_case, camelCase
+// ("cardId") and quoted mixed case ("Chat"). SQL always quotes them.
+const IDENT = /^[A-Za-z_][A-Za-z0-9_$]{0,62}$/;
 // Types are spliced into DDL, so only plain Postgres type names are allowed.
 const TYPE = /^[a-z][a-z0-9_ ]*(\(\d+(,\s*\d+)?\))?(\[\])?$/i;
 // Defaults are expressions; forbid statement breaks and comments.
@@ -10,10 +12,16 @@ const DEFAULT_EXPR = /^[^;]*$/;
 
 export const identifier = z
   .string()
-  .regex(IDENT, "Use lowercase snake_case identifiers (a-z, 0-9, _).");
+  .regex(IDENT, "Use a plain identifier: letters, digits and _, starting with a letter or _, up to 63 characters.");
+
+// Tables outside public are named "schema.table", the way the map shows them.
+const TABLE = /^([A-Za-z_][A-Za-z0-9_$]{0,62}\.)?[A-Za-z_][A-Za-z0-9_$]{0,62}$/;
+export const tableName = z
+  .string()
+  .regex(TABLE, "Use a table name, or schema.table for tables outside public.");
 
 export const columnSpecSchema = z.object({
-  name: identifier.describe("Column name, snake_case"),
+  name: identifier.describe("Column name; match the schema's existing style (snake_case or camelCase)"),
   type: z
     .string()
     .regex(TYPE, "Use a plain Postgres type such as text, integer, timestamptz.")
@@ -31,7 +39,7 @@ export const columnSpecSchema = z.object({
   primaryKey: z.boolean().optional().describe("True for the primary key column"),
   references: z
     .object({
-      table: identifier,
+      table: tableName,
       column: identifier,
       onDelete: z
         .enum(["no action", "cascade", "set null", "restrict"])
@@ -50,23 +58,23 @@ const position = z
 export const changePayloadSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("create_table"),
-    table: identifier,
+    table: tableName,
     columns: z.array(columnSpecSchema).min(1),
     position,
   }),
   z.object({
     kind: z.literal("add_column"),
-    table: identifier,
+    table: tableName,
     column: columnSpecSchema,
   }),
   z.object({
     kind: z.literal("set_not_null"),
-    table: identifier,
+    table: tableName,
     column: identifier,
   }),
   z.object({
     kind: z.literal("add_unique"),
-    table: identifier,
+    table: tableName,
     columns: z.array(identifier).min(1),
     caseInsensitive: z
       .boolean()
@@ -75,9 +83,9 @@ export const changePayloadSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("add_foreign_key"),
-    table: identifier,
+    table: tableName,
     column: identifier,
-    refTable: identifier,
+    refTable: tableName,
     refColumn: identifier,
     onDelete: z
       .enum(["no action", "cascade", "set null", "restrict"])
@@ -85,14 +93,14 @@ export const changePayloadSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("drop_foreign_key"),
-    table: identifier,
+    table: tableName,
     column: identifier,
-    refTable: identifier,
+    refTable: tableName,
     constraint: identifier.describe("Existing constraint name"),
   }),
   z.object({
     kind: z.literal("backfill"),
-    table: identifier,
+    table: tableName,
     column: identifier.optional(),
     sql: z
       .string()
@@ -101,7 +109,7 @@ export const changePayloadSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("add_index"),
-    table: identifier,
+    table: tableName,
     columns: z.array(identifier).min(1),
   }),
 ]);
@@ -423,6 +431,15 @@ export interface MigrationStep {
 
 export const q = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
+/** A table reference: `"t"` for public tables, `"s"."t"` for "s.t". */
+export const qt = (table: string) => {
+  const dot = table.indexOf(".");
+  return dot < 0 ? q(table) : `${q(table.slice(0, dot))}.${q(table.slice(dot + 1))}`;
+};
+
+/** The table name without its schema, for naming constraints and indexes. */
+export const bareTable = (table: string) => table.slice(table.indexOf(".") + 1);
+
 function columnDdl(column: ColumnSpec, forceNullable: boolean): string {
   const parts = [q(column.name), column.type];
   if (column.primaryKey) parts.push("PRIMARY KEY");
@@ -431,8 +448,19 @@ function columnDdl(column: ColumnSpec, forceNullable: boolean): string {
   return parts.join(" ");
 }
 
-function fkName(table: string, column: string) {
-  return `${table}_${column}_fkey`.slice(0, 63);
+export type FkNaming = "postgres" | "drizzle";
+
+/** Follows the schema's existing names: Drizzle's `a_b_c_d_fk`, or Postgres's `a_b_fkey`. */
+export function fkNaming(snapshot?: SchemaSnapshot): FkNaming {
+  const names = snapshot?.tables.flatMap((t) => t.foreignKeys.map((fk) => fk.name)) ?? [];
+  const drizzle = names.filter((n) => n.endsWith("_fk")).length;
+  return names.length && drizzle > names.length / 2 ? "drizzle" : "postgres";
+}
+
+export function fkName(table: string, column: string, refTable: string, refColumn: string, naming: FkNaming) {
+  const [t, r] = [bareTable(table), bareTable(refTable)];
+  const name = naming === "drizzle" ? `${t}_${column}_${r}_${refColumn}_fk` : `${t}_${column}_fkey`;
+  return name.slice(0, 63);
 }
 
 function fkStep(
@@ -442,13 +470,14 @@ function fkStep(
   refTable: string,
   refColumn: string,
   onDelete: string,
+  naming: FkNaming,
 ): MigrationStep {
   const action = onDelete === "no action" ? "" : ` ON DELETE ${onDelete.toUpperCase()}`;
   return {
     itemId,
     phase: 6,
     label: `Foreign key ${table}.${column} → ${refTable}.${refColumn}`,
-    sql: `ALTER TABLE ${q(table)} ADD CONSTRAINT ${q(fkName(table, column))} FOREIGN KEY (${q(column)}) REFERENCES ${q(refTable)} (${q(refColumn)})${action};`,
+    sql: `ALTER TABLE ${qt(table)} ADD CONSTRAINT ${q(fkName(table, column, refTable, refColumn, naming))} FOREIGN KEY (${q(column)}) REFERENCES ${qt(refTable)} (${q(refColumn)})${action};`,
     check: { type: "foreign_key", table, column, refTable, refColumn },
   };
 }
@@ -458,7 +487,7 @@ function notNullStep(itemId: string, table: string, column: string): MigrationSt
     itemId,
     phase: 4,
     label: `Enforce ${table}.${column} NOT NULL`,
-    sql: `ALTER TABLE ${q(table)} ALTER COLUMN ${q(column)} SET NOT NULL;`,
+    sql: `ALTER TABLE ${qt(table)} ALTER COLUMN ${q(column)} SET NOT NULL;`,
     check: { type: "not_null", table, column },
   };
 }
@@ -492,6 +521,7 @@ export function compileMigration(
   snapshot?: SchemaSnapshot,
 ): MigrationStep[] {
   const depths = snapshot ? tableDepths(projectSchema(snapshot, items)) : new Map<string, number>();
+  const naming = fkNaming(snapshot);
   const steps: MigrationStep[] = [];
   const ordered = [...activeItems(items)].sort((a, b) => a.position - b.position);
   for (const item of ordered) {
@@ -502,7 +532,7 @@ export function compileMigration(
           itemId: item.id,
           phase: 0,
           label: `Drop foreign key ${p.table}.${p.column} → ${p.refTable}`,
-          sql: `ALTER TABLE ${q(p.table)} DROP CONSTRAINT ${q(p.constraint)};`,
+          sql: `ALTER TABLE ${qt(p.table)} DROP CONSTRAINT ${q(p.constraint)};`,
         });
         break;
       case "create_table":
@@ -510,12 +540,12 @@ export function compileMigration(
           itemId: item.id,
           phase: 1,
           label: `Create table ${p.table}`,
-          sql: `CREATE TABLE ${q(p.table)} (\n  ${p.columns.map((c) => columnDdl(c, false)).join(",\n  ")}\n);`,
+          sql: `CREATE TABLE ${qt(p.table)} (\n  ${p.columns.map((c) => columnDdl(c, false)).join(",\n  ")}\n);`,
         });
         for (const c of p.columns) {
           if (c.references) {
             steps.push(
-              fkStep(item.id, p.table, c.name, c.references.table, c.references.column, c.references.onDelete),
+              fkStep(item.id, p.table, c.name, c.references.table, c.references.column, c.references.onDelete, naming),
             );
           }
         }
@@ -528,7 +558,7 @@ export function compileMigration(
           itemId: item.id,
           phase: 2,
           label: `Add column ${p.table}.${p.column.name}`,
-          sql: `ALTER TABLE ${q(p.table)} ADD COLUMN ${columnDdl(p.column, deferNotNull)};`,
+          sql: `ALTER TABLE ${qt(p.table)} ADD COLUMN ${columnDdl(p.column, deferNotNull)};`,
         });
         if (deferNotNull) steps.push(notNullStep(item.id, p.table, p.column.name));
         if (p.column.references) {
@@ -540,6 +570,7 @@ export function compileMigration(
               p.column.references.table,
               p.column.references.column,
               p.column.references.onDelete,
+              naming,
             ),
           );
         }
@@ -558,12 +589,12 @@ export function compileMigration(
         break;
       case "add_unique": {
         const cols = p.columns.map((c) => (p.caseInsensitive ? `lower(${q(c)})` : q(c)));
-        const name = `${p.table}_${p.columns.join("_")}_${p.caseInsensitive ? "lower_" : ""}key`.slice(0, 63);
+        const name = `${bareTable(p.table)}_${p.columns.join("_")}_${p.caseInsensitive ? "lower_" : ""}key`.slice(0, 63);
         steps.push({
           itemId: item.id,
           phase: 5,
           label: `Unique ${p.table} (${p.columns.join(", ")})`,
-          sql: `CREATE UNIQUE INDEX ${q(name)} ON ${q(p.table)} (${cols.join(", ")});`,
+          sql: `CREATE UNIQUE INDEX ${q(name)} ON ${qt(p.table)} (${cols.join(", ")});`,
           check: {
             type: "unique",
             table: p.table,
@@ -574,15 +605,15 @@ export function compileMigration(
         break;
       }
       case "add_foreign_key":
-        steps.push(fkStep(item.id, p.table, p.column, p.refTable, p.refColumn, p.onDelete));
+        steps.push(fkStep(item.id, p.table, p.column, p.refTable, p.refColumn, p.onDelete, naming));
         break;
       case "add_index": {
-        const name = `${p.table}_${p.columns.join("_")}_idx`.slice(0, 63);
+        const name = `${bareTable(p.table)}_${p.columns.join("_")}_idx`.slice(0, 63);
         steps.push({
           itemId: item.id,
           phase: 7,
           label: `Index ${p.table} (${p.columns.join(", ")})`,
-          sql: `CREATE INDEX ${q(name)} ON ${q(p.table)} (${p.columns.map(q).join(", ")});`,
+          sql: `CREATE INDEX ${q(name)} ON ${qt(p.table)} (${p.columns.map(q).join(", ")});`,
         });
         break;
       }
@@ -653,12 +684,12 @@ export function backfillSqlForPath(
 ): string {
   const aliases = path.hops.map((_, index) => `t${index + 1}`);
   const last = aliases[aliases.length - 1];
-  const fromList = path.hops.map((hop, index) => `${q(hop.refTable)} ${aliases[index]}`);
+  const fromList = path.hops.map((hop, index) => `${qt(hop.refTable)} ${aliases[index]}`);
   const joins = path.hops.map((hop, index) => {
     const left = index === 0 ? "s" : aliases[index - 1];
     return `${left}.${q(hop.column)} = ${aliases[index]}.${q(hop.refColumn)}`;
   });
-  return `UPDATE ${q(from)} s\nSET ${q(column)} = ${last}.${q(path.sourceColumn)}\nFROM ${fromList.join(", ")}\nWHERE ${joins.join("\n  AND ")};`;
+  return `UPDATE ${qt(from)} s\nSET ${q(column)} = ${last}.${q(path.sourceColumn)}\nFROM ${fromList.join(", ")}\nWHERE ${joins.join("\n  AND ")};`;
 }
 
 export function primaryKeyColumn(table: TableInfo | ProjectedTable): string | null {
