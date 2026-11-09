@@ -1,0 +1,319 @@
+<!doctype html>
+<!--
+  Frame renderer for the demo edit. edit.mjs computes every frame's state and
+  calls window.renderFrame(state); this page only draws it. Nothing here runs on
+  a clock, so each frame is deterministic. Monochrome, like the app.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #09090b;
+        color: #fafafa;
+        font-family: "Inter", system-ui, sans-serif;
+        font-feature-settings: "cv11", "ss01";
+        -webkit-font-smoothing: antialiased;
+      }
+      #win,
+      #under {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1536px;
+        height: 864px;
+        transform-origin: 0 0;
+        overflow: hidden;
+        background: #111;
+        will-change: transform, opacity, filter;
+      }
+      #win video,
+      #under video {
+        display: block;
+        width: 1536px;
+        height: 864px;
+      }
+      .card {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        opacity: 0;
+      }
+      .mark {
+        width: 64px;
+        height: 64px;
+        margin-bottom: 36px;
+      }
+      .eyebrow {
+        font-size: 17px;
+        font-weight: 500;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: #71717a;
+        margin-bottom: 20px;
+      }
+      .headline {
+        font-size: 92px;
+        line-height: 1.02;
+        font-weight: 600;
+        letter-spacing: -0.045em;
+        max-width: 1400px;
+      }
+      .sub {
+        margin-top: 26px;
+        font-size: 30px;
+        line-height: 1.45;
+        font-weight: 400;
+        letter-spacing: -0.01em;
+        color: #a1a1aa;
+        max-width: 1080px;
+        text-wrap: balance;
+      }
+      .card.has-items .headline {
+        font-size: 72px;
+      }
+      .items {
+        margin-top: 44px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        text-align: left;
+      }
+      .item {
+        display: flex;
+        align-items: baseline;
+        gap: 18px;
+        font-size: 36px;
+        line-height: 1.3;
+        font-weight: 500;
+        letter-spacing: -0.02em;
+        color: #e4e4e7;
+      }
+      .item .num {
+        color: #52525b;
+        font-variant-numeric: tabular-nums;
+        font-size: 24px;
+        min-width: 36px;
+      }
+      .line {
+        display: block;
+        will-change: transform, opacity;
+      }
+      .pill {
+        position: absolute;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 16px;
+        border-radius: 10px;
+        background: rgba(24, 24, 27, 0.92);
+        border: 1px solid #27272a;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        font-size: 21px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        opacity: 0;
+      }
+      #chip {
+        left: 48px;
+        top: 40px;
+      }
+      #chip .n {
+        color: #71717a;
+        font-variant-numeric: tabular-nums;
+      }
+      #chip .sep {
+        width: 1px;
+        height: 18px;
+        background: #3f3f46;
+      }
+      #ff {
+        right: 48px;
+        top: 40px;
+        color: #a1a1aa;
+      }
+      #cap {
+        position: absolute;
+        left: 50%;
+        bottom: 48px;
+        transform: translateX(-50%);
+        padding: 12px 22px;
+        border-radius: 10px;
+        background: rgba(9, 9, 11, 0.9);
+        border: 1px solid #27272a;
+        font-size: 29px;
+        line-height: 1.35;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+        opacity: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="under">
+      <video id="vb" muted preload="auto" playsinline></video>
+    </div>
+    <div id="win"><video id="v" muted preload="auto" playsinline></video></div>
+    <div id="cards"></div>
+    <div id="chip" class="pill">
+      <span class="n"></span><span class="sep"></span><span class="t"></span>
+    </div>
+    <div id="ff" class="pill"></div>
+    <div id="cap"></div>
+    <script>
+      const LOGO = `<svg class="mark" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="#fafafa"/><path d="M6 6h12v12H6z" stroke="#09090b" stroke-opacity=".3" stroke-dasharray="1.5 1.5"/><rect x="7.5" y="7.5" width="9" height="9" rx="1.5" fill="#09090b"/><path d="M7.5 10.5h9M10.5 10.5v6" stroke="#fafafa" stroke-width="1.2"/></svg>`;
+      const video = document.getElementById("v");
+      const videoB = document.getElementById("vb");
+      const win = document.getElementById("win");
+      const under = document.getElementById("under");
+      const cardsEl = document.getElementById("cards");
+      const chip = document.getElementById("chip");
+      const cap = document.getElementById("cap");
+      const ff = document.getElementById("ff");
+      const cards = new Map();
+      const lastSrc = new Map();
+
+      const esc = (s) =>
+        s.replace(
+          /[&<>]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c],
+        );
+      const clamp = (x) => Math.max(0, Math.min(1, x));
+      const ease = (x) => 1 - Math.pow(1 - clamp(x), 3);
+
+      window.setup = async ({ videoUrl, fontUrl, cardDefs }) => {
+        const font = new FontFace("Inter", `url(${fontUrl})`, {
+          weight: "100 900",
+        });
+        document.fonts.add(await font.load());
+        for (const v of [video, videoB]) {
+          v.src = videoUrl;
+          await new Promise((resolve, reject) => {
+            v.addEventListener("loadeddata", resolve, { once: true });
+            v.addEventListener(
+              "error",
+              () => reject(new Error("video failed to load")),
+              { once: true },
+            );
+          });
+        }
+        for (const def of cardDefs) {
+          const el = document.createElement("div");
+          el.className = "card";
+          const lines = [];
+          if (def.logo) lines.push(`<span class="line">${LOGO}</span>`);
+          if (def.eyebrow)
+            lines.push(`<span class="line eyebrow">${esc(def.eyebrow)}</span>`);
+          lines.push(`<span class="line headline">${esc(def.title)}</span>`);
+          if (def.sub)
+            lines.push(`<span class="line sub">${esc(def.sub)}</span>`);
+          if (def.items?.length) {
+            el.classList.add("has-items");
+            const items = def.items
+              .map(
+                (item, i) =>
+                  `<span class="item"><span class="num">0${i + 1}</span><span>${esc(item)}</span></span>`,
+              )
+              .join("");
+            lines.push(`<span class="line items">${items}</span>`);
+          }
+          el.innerHTML = lines.join("");
+          cardsEl.appendChild(el);
+          cards.set(def.id, el);
+        }
+        await document.fonts.ready;
+      };
+
+      async function seek(video, t) {
+        if (lastSrc.has(video) && Math.abs(lastSrc.get(video) - t) < 1e-4)
+          return;
+        lastSrc.set(video, t);
+        await new Promise((resolve) => {
+          let done = false;
+          const finish = () => {
+            if (!done) {
+              done = true;
+              resolve();
+            }
+          };
+          video.addEventListener(
+            "seeked",
+            () => {
+              if (video.requestVideoFrameCallback)
+                video.requestVideoFrameCallback(finish);
+              setTimeout(finish, 150);
+            },
+            { once: true },
+          );
+          setTimeout(finish, 3000);
+          video.currentTime = t;
+        });
+      }
+
+      // state: { src, cam:{x,y,w}, winOpacity, winBlur, card:{id,p,out}, chip:{n,text,o}, cap:{text,o}, ff:{text,o} }
+      window.renderFrame = async (s) => {
+        const place = (el, cam) => {
+          const k = 1920 / cam.w;
+          el.style.transform = `translate(${-cam.x * k}px, ${-cam.y * k}px) scale(${k})`;
+          el.style.borderRadius = `${14 / k}px`;
+          el.style.boxShadow = `0 ${24 / k}px ${64 / k}px rgba(0,0,0,.5), 0 0 0 ${1 / k}px rgba(255,255,255,.1)`;
+        };
+        if (s.src != null) await seek(video, s.src);
+        place(win, s.cam);
+        if (s.under) {
+          await seek(videoB, s.under.src);
+          place(under, s.under.cam);
+          under.style.opacity = 1;
+          win.style.opacity = s.mix;
+        } else {
+          under.style.opacity = 0;
+          win.style.opacity = s.winOpacity;
+        }
+        win.style.filter = s.winBlur > 0.05 ? `blur(${s.winBlur}px)` : "none";
+
+        for (const [id, el] of cards) {
+          if (!s.card || s.card.id !== id) {
+            el.style.opacity = 0;
+            continue;
+          }
+          const { p, out } = s.card;
+          el.style.opacity = 1 - ease(out);
+          [...el.children].forEach((line, i) => {
+            const local = ease((p - i * 0.1) / 0.6);
+            line.style.opacity = local;
+            line.style.transform = `translateY(${(1 - local) * 16}px)`;
+          });
+          el.querySelectorAll(".item").forEach((item, i) => {
+            const shown = ease(s.card.items?.[i] ?? 1);
+            item.style.opacity = shown;
+            item.style.transform = `translateY(${(1 - shown) * 12}px)`;
+          });
+        }
+
+        chip.querySelector(".n").textContent = s.chip?.n ?? "";
+        chip.querySelector(".t").textContent = s.chip?.text ?? "";
+        chip.style.opacity = s.chip?.o ?? 0;
+        chip.style.transform = `translateY(${(1 - (s.chip?.o ?? 0)) * -8}px)`;
+
+        cap.textContent = s.cap?.text ?? "";
+        cap.style.opacity = s.cap?.o ?? 0;
+
+        ff.textContent = s.ff?.text ?? "";
+        ff.style.opacity = s.ff?.o ?? 0;
+      };
+    </script>
+  </body>
+</html>

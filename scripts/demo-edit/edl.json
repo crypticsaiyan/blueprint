@@ -1,0 +1,209 @@
+{
+  "fps": 30,
+  "voice": "aai-michael",
+  "maxSpeed": 2,
+  "sections": [
+    {
+      "id": "problem",
+      "card": {
+        "eyebrow": "The problem",
+        "title": "Schema changes are the riskiest deploys.",
+        "items": [
+          "You can't see what a migration breaks.",
+          "Real data hides duplicates and nulls.",
+          "Code breaks quietly.",
+          "You find out in production."
+        ]
+      },
+      "vo": "Schema changes are the riskiest deploys. You can't see what a migration breaks. Real data hides duplicates and nulls. Code breaks quietly. You find out in production."
+    },
+    {
+      "id": "solution",
+      "card": {
+        "logo": true,
+        "eyebrow": "The solution",
+        "title": "Blueprint",
+        "sub": "See the impact. Rehearse on real data. Ship a pull request that works."
+      },
+      "vo": "Blueprint lets you see the impact, rehearse on a copy of your real data, and ship a pull request that works."
+    },
+    {
+      "id": "dashboard",
+      "take": "features",
+      "pillar": "Setup",
+      "label": "Works on real repos",
+      "vo": {
+        "dashboard-1": "It works on real repos, with Drizzle, Prisma, supabase-js, or plain SQL migrations."
+      }
+    },
+    {
+      "id": "import",
+      "pillar": "See",
+      "label": "Import a repo",
+      "trim": [1.4, 0],
+      "vo": {
+        "import-1": "Import a repo. Here, the bundled demo app, Tallyhub.",
+        "import-2": [
+          "Blueprint reads eight tables, the sample rows, and thirty-five queries.",
+          -2.5
+        ]
+      }
+    },
+    {
+      "id": "map",
+      "take": "features",
+      "pillar": "See",
+      "label": "The map",
+      "vo": {
+        "map-1": "The map shows every table with its row count, and which code modules read or write it."
+      }
+    },
+    {
+      "id": "inspect",
+      "take": "features",
+      "pillar": "See",
+      "label": "Inspect a table",
+      "vo": {
+        "inspect-1": "Click a table for its columns, planned changes, and queries.",
+        "inspect-2": "The data tab shows its real rows."
+      }
+    },
+    {
+      "id": "module",
+      "take": "features",
+      "pillar": "See",
+      "label": "Inspect a module",
+      "trim": [0, 2.5],
+      "vo": {
+        "module-1": "Click a module to see its queries, line by line."
+      }
+    },
+    {
+      "id": "ask",
+      "pillar": "See",
+      "label": "Ask the agent",
+      "zoom": [[1, 45]],
+      "vo": {
+        "ask-1": "Ask the agent for a change in plain English.",
+        "ask-2": "It proposes ghost tables and columns, each with a reason, and buttons to accept, reject, lock, or edit it."
+      }
+    },
+    {
+      "id": "draw",
+      "take": "draw",
+      "pillar": "See",
+      "label": "Draw a relationship",
+      "zoom": [[1, 4]],
+      "vo": {
+        "draw-1": "Or draw it. Drag projects to orgs.",
+        "draw-2": "Blueprint proposes the column, the backfill, and the foreign key, and counts the rows it can fill."
+      },
+      "speed": 1.2
+    },
+    {
+      "id": "drawtable",
+      "take": "features",
+      "pillar": "See",
+      "label": "Draw a table",
+      "vo": {
+        "drawtable-1": ["Sketch a new table,", 1.0],
+        "drawtable-2": "and the agent fills in its columns."
+      }
+    },
+    {
+      "id": "rule",
+      "take": "features",
+      "pillar": "See",
+      "label": "Architecture rules",
+      "vo": {
+        "rule-1": "Forbid an import between modules, and the violation is flagged for the agent to fix."
+      }
+    },
+    {
+      "id": "steer",
+      "pillar": "See",
+      "label": "Steer the plan",
+      "vo": {
+        "steer-1": "Reject and lock what you don't want.",
+        "steer-2": "The agent re-plans around it."
+      }
+    },
+    {
+      "id": "impact",
+      "take": "tour",
+      "pillar": "See",
+      "label": "Code impact",
+      "zoom": [
+        {
+          "rect": [0, 560, 1150, 304],
+          "after": 3.0
+        }
+      ],
+      "vo": {
+        "impact-1": "Code impact lists every affected query, with file and line."
+      }
+    },
+    {
+      "id": "rehearse",
+      "until": "tests",
+      "pillar": "Rehearse",
+      "label": "Rehearse on a copy of the data",
+      "zoom": [[1, 5]],
+      "vo": {
+        "rehearse-1": "Rehearse runs the real migration on a copy of your data, and shows every changed row.",
+        "conflicts-1": "It catches what would fail in production: twenty-two invoices with no org.",
+        "conflicts-2": "Pick a fix, and the rehearsal passes."
+      }
+    },
+    {
+      "id": "sql",
+      "take": "tour",
+      "pillar": "Ship",
+      "label": "Generated migration",
+      "zoom": [
+        {
+          "rect": [0, 560, 1150, 304],
+          "after": 1.4
+        }
+      ],
+      "vo": {
+        "sql-1": "The migration is generated: columns, backfills, then constraints, in one transaction."
+      }
+    },
+    {
+      "id": "tests",
+      "until": "end",
+      "pillar": "Ship",
+      "label": "Test and ship",
+      "zoom": [[1, 3], [3, 3], [5]],
+      "vo": {
+        "tests-1": "Your repo's own tests and typecheck run against the migrated data.",
+        "tests-2": "Three fail, so the agent fixes the code.",
+        "tests-3": "All eighteen pass, and every file is labeled: generated, or agent fix.",
+        "pr-1": "One click opens the pull request."
+      }
+    },
+    {
+      "id": "agent",
+      "card": {
+        "eyebrow": "Built on Agent-Native",
+        "title": "Every button is an agent action.",
+        "items": [
+          "Import, propose, and draw.",
+          "Rehearse and resolve conflicts.",
+          "Fix code, run tests, open the PR."
+        ]
+      },
+      "vo": "Every button in Blueprint is an action the agent can call too. You and the agent work on one plan."
+    },
+    {
+      "id": "end",
+      "card": {
+        "logo": true,
+        "title": "Blueprint",
+        "sub": "Open source. Built on Agent-Native."
+      },
+      "duration": 3
+    }
+  ]
+}
