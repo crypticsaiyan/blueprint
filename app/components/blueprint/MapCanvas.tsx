@@ -7,6 +7,7 @@ import { IconCode, IconLayoutDistributeHorizontal, IconPointer, IconSquarePlus }
 import {
   Background,
   BackgroundVariant,
+  ConnectionLineType,
   Controls,
   MarkerType,
   Panel,
@@ -350,7 +351,7 @@ function Canvas({
         selectable: true,
         style: {
           stroke: color,
-          strokeWidth: selected ? 2.5 : ghost || dropped || touched ? 1.8 : 1.3,
+          strokeWidth: selected ? 2.5 : ghost || dropped ? 2.2 : touched ? 1.8 : 1.3,
           strokeDasharray: ghost || dropped ? "6 4" : undefined,
           opacity: large && focus && !touched && !ghost && !dropped ? 0.15 : 1,
         },
@@ -492,6 +493,8 @@ function Canvas({
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onConnect={onConnect}
+        connectionLineType={ConnectionLineType.Bezier}
+        connectionLineStyle={{ stroke: "hsl(var(--bp-ghost))", strokeWidth: 2.5, strokeDasharray: "6 4" }}
         onNodeClick={(_, node) => {
           if (node.type === "folder") {
             const folder = node.id.slice("group:".length);
