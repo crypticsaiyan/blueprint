@@ -1,20 +1,23 @@
-import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
 
-import { fail, noteExternalWrite } from "@agent-native/core/action";
+import { fail } from "@agent-native/core/action";
 import { and, eq } from "drizzle-orm";
 
 import { activeItems, compileMigration, shippableMigrationSql } from "../../shared/changes.js";
 import type { RehearsalResult } from "../../shared/rehearsal-types.js";
 import { getDb, schema } from "../db/index.js";
-import { generateDrizzleSchema } from "./code/drizzle-codegen.js";
+import { generateDrizzleSchemaFiles } from "./code/drizzle-codegen.js";
+import { generatePrismaSchema } from "./code/prisma-codegen.js";
+import { decodeText, encodeText, findSupabaseTypes, generateSupabaseTypes } from "./code/supabase-types.js";
+import { migrationLayout, removeMigration, writeMigration } from "./migration-writer.js";
 import { loadItems, nowIso, scopeOf, type ChangesetRow, type ProjectRow } from "./projects.js";
 import { migratedDump } from "./run-rehearsal.js";
 import {
+  baselineBytes,
   baselineFile,
   ensureWorkspace,
+  readWorkspaceBytes,
   readWorkspaceFile,
-  resolveInside,
   writeWorkspaceFile,
 } from "./workspace.js";
 
@@ -29,12 +32,6 @@ function slug(text: string) {
       .replace(/^_|_$/g, "")
       .slice(0, 40) || "changes"
   );
-}
-
-async function migrationsDir(dir: string): Promise<string> {
-  const config = (await readWorkspaceFile(dir, "drizzle.config.ts")) ?? (await readWorkspaceFile(dir, "drizzle.config.js"));
-  const out = config?.match(/out:\s*["'`]\.?\/?([^"'`]+)["'`]/)?.[1];
-  return out ? out.replace(/\/$/, "") : "migrations";
 }
 
 /** The rule check that ships with the repo: plain Node, no dependencies. */
@@ -79,6 +76,12 @@ console.log(\`Dependency rules: \${rules.length} checked, no violations.\`);
 `;
 }
 
+/** The dump's path in the repo, or null when the schema came from migrations. */
+export function repoDumpPath(project: ProjectRow): string | null {
+  const rel = path.relative(project.repoPath, project.dumpPath);
+  return rel.startsWith("..") || path.isAbsolute(rel) ? null : rel.split(path.sep).join("/");
+}
+
 export interface SyncResult {
   dir: string;
   generated: string[];
@@ -101,50 +104,101 @@ export async function syncWorkspace(project: ProjectRow, changeset: ChangesetRow
   let pending: string | null = null;
 
   const schemaFile = project.code?.schemaFile;
-  if (schemaFile) {
-    const baseline = await baselineFile(dir, schemaFile);
-    if (baseline !== null) {
-      let next: string;
-      try {
-        next = generateDrizzleSchema(baseline, items);
-      } catch (error) {
-        fail(`Could not update ${schemaFile}: ${(error as Error).message}`, { errorCode: "schema_codegen_failed" });
+  const prisma = project.code?.adapter === "prisma";
+  const schemaFiles = schemaFile
+    ? project.code?.schemaFiles?.length
+      ? project.code.schemaFiles
+      : [schemaFile]
+    : prisma
+      ? (project.code?.schemaFiles ?? [])
+      : [];
+  let schemaNotes: string[] = [];
+  if (schemaFiles.length) {
+    const baselines = new Map<string, string>();
+    for (const file of schemaFiles) {
+      const text = await baselineFile(dir, file);
+      if (text !== null) baselines.set(file, text);
+    }
+    let changed: Map<string, string>;
+    try {
+      if (prisma) {
+        const result = generatePrismaSchema(baselines, items);
+        changed = result.files;
+        schemaNotes = result.notes;
+      } else {
+        changed = generateDrizzleSchemaFiles(baselines, items, schemaFile!, project.schema.tables.map((t) => t.name));
       }
-      if (next !== baseline || (await readWorkspaceFile(dir, schemaFile)) !== baseline) {
-        await writeWorkspaceFile(dir, schemaFile, next);
+    } catch (error) {
+      fail(`Could not update the ${prisma ? "Prisma" : "Drizzle"} schema: ${(error as Error).message}`, { errorCode: "schema_codegen_failed" });
+    }
+    for (const [file, baseline] of baselines) {
+      const next = changed.get(file) ?? baseline;
+      if (next !== baseline || (await readWorkspaceFile(dir, file)) !== baseline) {
+        await writeWorkspaceFile(dir, file, next);
       }
-      if (next !== baseline) generated.push(schemaFile);
+      if (next !== baseline) generated.push(file);
     }
   }
 
-  const outDir = await migrationsDir(dir);
-  const prefix = `blueprint_${changeset.id.slice(0, 8)}_`;
-  noteExternalWrite("local-disk");
-  try {
-    for (const name of await readdir(resolveInside(dir, outDir))) {
-      if (name.startsWith(prefix)) await rm(path.join(resolveInside(dir, outDir), name));
-    }
-  } catch {
-    // No migrations directory yet.
+  // Supabase repos type the client with generated Database types; they
+  // follow the schema so the typecheck sees what the change breaks.
+  const typesFiles =
+    project.code?.adapter === "supabase-js" ? (project.code.schemaFiles ?? (await findSupabaseTypes(dir))) : [];
+  const typesNotes: string[] = [];
+  for (const file of typesFiles) {
+    const baseline = await baselineBytes(dir, file);
+    if (!baseline) continue;
+    const stored = decodeText(baseline);
+    const result = generateSupabaseTypes(stored.text, items, project.schema);
+    typesNotes.push(...result.notes);
+    const next = result.text === stored.text ? baseline : encodeText(stored, result.text);
+    const current = await readWorkspaceBytes(dir, file);
+    if (!current?.equals(next)) await writeWorkspaceFile(dir, file, next);
+    if (result.text !== stored.text) generated.push(file);
   }
-  const dumpRel = path.relative(project.repoPath, project.dumpPath).split(path.sep).join("/");
+
+  const layout = await migrationLayout(dir);
+  let migrationFiles: string[] = [];
+  let migrationNote: string | null = null;
+  let dumpNote: string | null = null;
+  const dumpRel = repoDumpPath(project);
+  const restoreDump = async () => {
+    const baseline = dumpRel ? await baselineFile(dir, dumpRel) : null;
+    if (dumpRel && baseline !== null) await writeWorkspaceFile(dir, dumpRel, baseline);
+  };
   if (active.length) {
     const { result, dump } = await migratedDump(project, changeset.id, items);
     rehearsal = result;
-    if (dump) {
-      const file = `${outDir}/${prefix}${slug(changeset.goal || "changes")}.sql`;
-      const header = `-- ${changeset.goal || "Schema changes"}\n-- Generated by Blueprint after a passing rehearsal on the sample data.\n\n`;
-      await writeWorkspaceFile(dir, file, header + shippableMigrationSql(compileMigration(items, project.schema), result));
-      await writeWorkspaceFile(dir, dumpRel, dump);
-      generated.push(file, dumpRel);
+    if (result.status === "passed") {
+      const header = `-- ${changeset.goal || "Schema changes"}\n-- Generated by Blueprint after a passing rehearsal${dumpRel ? " on the sample data" : ""}.\n\n`;
+      const written = await writeMigration(
+        dir,
+        layout,
+        changeset,
+        slug(changeset.goal || "changes"),
+        header,
+        shippableMigrationSql(compileMigration(items, project.schema), result),
+      );
+      migrationFiles = written.files;
+      // With schema.prisma updated, only what it could not express is left to say.
+      migrationNote = prisma && schemaFiles.length ? schemaNotes.join(" ") || null : written.note;
+      generated.push(...migrationFiles);
+      if (dumpRel && dump) {
+        await writeWorkspaceFile(dir, dumpRel, dump);
+        generated.push(dumpRel);
+      } else if (dumpRel) {
+        // Hand-written schema files keep their own text; the migration carries the change.
+        await restoreDump();
+        dumpNote = `${dumpRel} is left as it is: it holds more than tables and rows, so Blueprint does not rewrite it. Update it from the migrated database if the repo keeps it in sync.`;
+      }
     } else {
-      pending = `The rehearsal is ${result.status}; the migration and migrated data are written once it passes.`;
-      const baseline = await baselineFile(dir, dumpRel);
-      if (baseline !== null) await writeWorkspaceFile(dir, dumpRel, baseline);
+      pending = `The rehearsal is ${result.status}; the migration${dumpRel ? " and migrated data are" : " is"} written once it passes.`;
+      await removeMigration(dir, layout, changeset.id);
+      await restoreDump();
     }
   } else {
-    const baseline = await baselineFile(dir, dumpRel);
-    if (baseline !== null) await writeWorkspaceFile(dir, dumpRel, baseline);
+    await removeMigration(dir, layout, changeset.id);
+    await restoreDump();
   }
 
   const rules = await getDb()
@@ -176,7 +230,15 @@ export async function syncWorkspace(project: ProjectRow, changeset: ChangesetRow
         changesetId: changeset.id,
         projectId: project.id,
         path: file,
-        summary: file === schemaFile ? "Drizzle schema updated from the changeset" : file === dumpRel ? "Sample data migrated" : file.startsWith(outDir) ? "Migration with conflict fixes" : "Dependency rule check",
+        summary: typesFiles.includes(file)
+          ? `Supabase types updated from the changeset${typesNotes.length ? `. ${typesNotes.join(" ")}` : ""}`
+          : schemaFiles.includes(file) ? `${prisma ? "Prisma" : "Drizzle"} schema updated from the changeset${prisma && schemaNotes.length ? `. ${schemaNotes.join(" ")}` : ""}` : file === dumpRel ? "Sample data migrated" : file.endsWith("_journal.json")
+              ? `Migration registered in the Drizzle journal${migrationNote ? `. ${migrationNote}` : ""}`
+              : file.endsWith("_snapshot.json")
+                ? "Drizzle snapshot of the new schema (from drizzle-kit)"
+                : migrationFiles.includes(file)
+                  ? `Migration with conflict fixes${layout.tool === "prisma" && migrationNote ? `. ${migrationNote}` : ""}${dumpNote ? `. ${dumpNote}` : ""}`
+                  : "Dependency rule check",
         origin: "generated" as const,
         createdAt: nowIso(),
         ...scopeOf(project),
@@ -195,6 +257,8 @@ export async function generatedPaths(project: ProjectRow, changeset: ChangesetRo
     .limit(100);
   const out = new Set(rows.map((r) => r.path));
   if (project.code?.schemaFile) out.add(project.code.schemaFile);
-  out.add(path.relative(project.repoPath, project.dumpPath).split(path.sep).join("/"));
+  for (const file of project.code?.schemaFiles ?? []) out.add(file);
+  const dumpRel = repoDumpPath(project);
+  if (dumpRel) out.add(dumpRel);
   return out;
 }

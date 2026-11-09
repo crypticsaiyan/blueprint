@@ -5,9 +5,14 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { findOpenChangeset, requireProject } from "../server/lib/projects.js";
 import { shipReadiness } from "../server/lib/ship-status.js";
+import { testJob } from "../server/lib/test-jobs.js";
+import type { WorkspaceDiff } from "../server/lib/workspace.js";
 import { hasWorkspace, workspaceDiff, workspacePath } from "../server/lib/workspace.js";
 
 const MAX_PATCH = 400_000;
+// While tests run, git in the working copy belongs to them (the baseline run
+// stashes it), so the screen shows the last diff it read.
+const lastDiff = new Map<string, WorkspaceDiff>();
 
 export default defineAction({
   description:
@@ -52,7 +57,13 @@ export default defineAction({
       .where(eq(schema.codeEdits.changesetId, changeset.id))
       .orderBy(desc(schema.codeEdits.createdAt))
       .limit(300);
-    const diff = (await hasWorkspace(changeset.id)) ? await workspaceDiff(workspacePath(changeset.id)) : { files: [], patch: "" };
+    const running = testJob(changeset.id);
+    const diff = running
+      ? (lastDiff.get(changeset.id) ?? { files: [], patch: "" })
+      : (await hasWorkspace(changeset.id))
+        ? await workspaceDiff(workspacePath(changeset.id), true)
+        : { files: [], patch: "" };
+    if (!running) lastDiff.set(changeset.id, diff);
     const readiness = await shipReadiness(projectId, changeset);
     const [pr] = await db
       .select({ url: schema.pullRequests.url, number: schema.pullRequests.number, branch: schema.pullRequests.branch, createdAt: schema.pullRequests.createdAt })

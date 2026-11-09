@@ -8,6 +8,7 @@ import { githubToken, openPullRequest, parseRepo } from "../server/lib/github.js
 import { findOpenChangeset, loadItems, nowIso, requireProject, scopeOf } from "../server/lib/projects.js";
 import { shipReadiness } from "../server/lib/ship-status.js";
 import { workspaceDiff, workspacePath, hasWorkspace } from "../server/lib/workspace.js";
+import { assertWorkspaceFree } from "../server/lib/test-jobs.js";
 
 export default defineAction({
   description:
@@ -32,6 +33,7 @@ export default defineAction({
     const readiness = await shipReadiness(projectId, changeset);
     if (!readiness.ready) fail(readiness.blockers.join(" "), { errorCode: "not_ready", statusCode: 409 });
 
+    assertWorkspaceFree(changeset.id);
     const token = await githubToken();
     const diff = await workspaceDiff(workspacePath(changeset.id));
     if (!diff.patch.trim()) fail("The working copy has no changes.", { errorCode: "nothing_to_ship" });
@@ -53,6 +55,7 @@ export default defineAction({
     const goal = changeset.goal || "Schema and code changes";
     const prTitle = title ?? goal.charAt(0).toUpperCase() + goal.slice(1);
     const test = readiness.test!;
+    const hasData = project.schema.tables.some((t) => t.rowCount > 0);
     const body = [
       `## ${prTitle}`,
       "",
@@ -66,8 +69,12 @@ export default defineAction({
         return `- \`${f.path}\` (+${f.additions} −${f.deletions})${edit ? `: ${edit.summary}` : ""}`;
       }),
       "\n### Verification",
-      rehearsal ? `- Rehearsed on a copy of the sample data: ${rehearsal.status}.` : "",
-      `- \`${test.command}\`: ${test.passed}/${test.total} passed against the migrated data.`,
+      rehearsal
+        ? hasData
+          ? `- Rehearsed on a copy of the sample data: ${rehearsal.status}.`
+          : `- Rehearsed on the schema rebuilt from the repo's migrations (no sample data): ${rehearsal.status}.`
+        : "",
+      `- \`${test.command}\`: ${test.passed}/${test.total} passed${hasData ? " against the migrated data" : ""}.`,
     ]
       .filter((line) => line !== "")
       .join("\n");

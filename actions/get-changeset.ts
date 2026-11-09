@@ -23,6 +23,10 @@ export default defineAction({
     rehearsal: z
       .object({ id: z.string(), status: z.string(), createdAt: z.string(), stale: z.boolean(), result: jsonObject })
       .nullable(),
+    test: z
+      .object({ status: z.string(), passed: z.number(), failed: z.number(), total: z.number(), stale: z.boolean() })
+      .nullable(),
+    pullRequest: z.object({ number: z.number(), url: z.string() }).nullable(),
     conflicts: z.array(
       z.object({
         id: z.string(),
@@ -43,7 +47,7 @@ export default defineAction({
     const project = await requireProject(projectId);
     const changeset = await findOpenChangeset(projectId);
     if (!changeset) {
-      return { changeset: null, items: [], steps: [], sql: migrationSql([]), rehearsal: null, conflicts: [] };
+      return { changeset: null, items: [], steps: [], sql: migrationSql([]), rehearsal: null, test: null, pullRequest: null, conflicts: [] };
     }
     const items = await loadItems(changeset.id);
     const steps = compileMigration(items, project.schema);
@@ -53,6 +57,18 @@ export default defineAction({
       .from(schema.rehearsals)
       .where(eq(schema.rehearsals.changesetId, changeset.id))
       .orderBy(desc(schema.rehearsals.createdAt))
+      .limit(1);
+    const [test] = await db
+      .select()
+      .from(schema.testRuns)
+      .where(eq(schema.testRuns.changesetId, changeset.id))
+      .orderBy(desc(schema.testRuns.createdAt))
+      .limit(1);
+    const [pr] = await db
+      .select()
+      .from(schema.pullRequests)
+      .where(eq(schema.pullRequests.changesetId, changeset.id))
+      .orderBy(desc(schema.pullRequests.createdAt))
       .limit(1);
     const conflictRows = await db
       .select()
@@ -80,6 +96,10 @@ export default defineAction({
             result: rehearsal.result as unknown as Record<string, unknown>,
           }
         : null,
+      test: test
+        ? { status: test.status, passed: test.passed, failed: test.failed, total: test.total, stale: test.createdAt < changeset.updatedAt }
+        : null,
+      pullRequest: pr ? { number: pr.number, url: pr.url } : null,
       conflicts: conflictRows.map((row) => ({
         id: row.id,
         key: row.key,

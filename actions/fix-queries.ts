@@ -8,6 +8,7 @@ import { changesetForCode } from "../server/lib/changeset-guard.js";
 import { currentAnalysis } from "../server/lib/code-state.js";
 import { loadItems, nowIso, requireProject, scopeOf } from "../server/lib/projects.js";
 import { generatedPaths, syncWorkspace } from "../server/lib/ship.js";
+import { assertWorkspaceFree } from "../server/lib/test-jobs.js";
 import { eq } from "drizzle-orm";
 import { readWorkspaceFile, writeWorkspaceFile } from "../server/lib/workspace.js";
 
@@ -41,6 +42,7 @@ export default defineAction({
   run: async ({ projectId, summary, edits }) => {
     const project = await requireProject(projectId, "editor");
     const changeset = await changesetForCode(project);
+    assertWorkspaceFree(changeset.id);
     const { dir } = await syncWorkspace(project, changeset);
     const generated = await generatedPaths(project, changeset);
 

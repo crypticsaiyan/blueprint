@@ -41,7 +41,8 @@ export async function shipReadiness(projectId: string, changeset: ChangesetRow) 
   const lastChange = [changeset.updatedAt, edit?.createdAt, rule?.createdAt].filter(Boolean).sort().pop()!;
   const hasPlan = Boolean(items);
   const rehearsalOk = !hasPlan || (rehearsal?.status === "passed" && rehearsal.createdAt >= changeset.updatedAt);
-  const testsOk = test?.status === "passed" && test.createdAt >= lastChange;
+  // A repo with nothing to run ships on the rehearsal alone.
+  const testsOk = (test?.status === "passed" || test?.status === "none") && test.createdAt >= lastChange;
   const blockers: string[] = [];
   if (!hasPlan && !edit && !rule) blockers.push("Nothing to ship yet.");
   if (!rehearsalOk) blockers.push(rehearsal ? "Rehearse again: the last rehearsal did not pass or the plan changed." : "Rehearse the migration first.");

@@ -184,7 +184,8 @@ export const codeEdits = pgTable(
   (t) => [index("code_edits_changeset_idx").on(t.changesetId, t.createdAt)],
 );
 
-export type TestCase = { name: string; file: string; status: "passed" | "failed" | "skipped"; message?: string | undefined };
+/** "preexisting": fails on the untouched code too, so the change did not cause it. */
+export type TestCase = { name: string; file: string; status: "passed" | "failed" | "skipped" | "preexisting"; message?: string | undefined };
 
 export const testRuns = pgTable(
   "test_runs",
@@ -192,7 +193,7 @@ export const testRuns = pgTable(
     id: text("id").primaryKey(),
     changesetId: text("changeset_id").notNull(),
     projectId: text("project_id").notNull(),
-    status: text("status", { enum: ["passed", "failed", "error"] }).notNull(),
+    status: text("status", { enum: ["passed", "failed", "error", "none"] }).notNull(),
     command: text("command").notNull(),
     total: integer("total").notNull().default(0),
     passed: integer("passed").notNull().default(0),
