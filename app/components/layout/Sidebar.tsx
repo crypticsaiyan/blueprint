@@ -1,4 +1,5 @@
 import { appPath } from "@agent-native/core/client/api-path";
+import { useActionQuery } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import {
   navigateWithAgentChatViewTransition,
@@ -12,10 +13,8 @@ import {
 } from "@agent-native/toolkit/app/chat/ownership-history";
 import { OrgSwitcher } from "@agent-native/toolkit/app/org";
 import { openCommandMenu } from "@agent-native/toolkit/app/shared";
-import { AgentNativeIcon } from "@agent-native/toolkit/app/shared/AgentNativeIcon";
 import {
   IconEdit,
-  IconHome,
   IconSchema,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
@@ -31,8 +30,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { BlueprintLogo } from "@/components/blueprint/BlueprintLogo";
+import { StageDot } from "@/components/blueprint/StageBadge";
 import { APP_TITLE } from "@/lib/app-config";
-import { chatThreadPath, HOME_PATH, threadIdFromPath } from "@/lib/chat-paths";
+import { projectStage } from "@shared/stage";
+import { chatThreadPath, threadIdFromPath } from "@/lib/chat-paths";
 import { cn } from "@/lib/utils";
 
 const CHAT_STORAGE_KEY = "chat";
@@ -118,42 +120,6 @@ function persistActiveThreadId(threadId: string) {
   } catch {}
 }
 
-function HomeNavLink({ collapsed }: { collapsed: boolean }) {
-  const t = useT();
-  const location = useLocation();
-  const active = location.pathname === HOME_PATH;
-  const link = (
-    <Link
-      to={HOME_PATH}
-      aria-current={active ? "page" : undefined}
-      aria-label={collapsed ? t("navigation.home") : undefined}
-      className={cn(
-        "flex items-center text-sidebar-accent-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-        active && "bg-sidebar-accent",
-        collapsed
-          ? "size-8 justify-center rounded-md"
-          : "h-8 w-full gap-3 rounded-lg px-3 text-sm font-medium",
-      )}
-    >
-      <IconHome className="size-4 shrink-0" strokeWidth={1.8} />
-      <span className={collapsed ? "sr-only" : "truncate"}>
-        {t("navigation.home")}
-      </span>
-    </Link>
-  );
-
-  if (collapsed) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>{link}</TooltipTrigger>
-        <TooltipContent side="right">{t("navigation.home")}</TooltipContent>
-      </Tooltip>
-    );
-  }
-
-  return <div className="px-2">{link}</div>;
-}
-
 function ProjectsNavLink({ collapsed }: { collapsed: boolean }) {
   const t = useT();
   const location = useLocation();
@@ -188,6 +154,43 @@ function ProjectsNavLink({ collapsed }: { collapsed: boolean }) {
   }
 
   return <div className="px-2">{link}</div>;
+}
+
+/** The latest projects under the Projects link, each with its changeset status. */
+function RecentProjects() {
+  const t = useT();
+  const location = useLocation();
+  const projects = useActionQuery("list-projects", {});
+  const recent = [...(projects.data?.projects ?? [])]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, 5);
+  if (!recent.length) return <div className="pb-3" />;
+  return (
+    <div className="px-2 pt-1 pb-4">
+      <p className="px-3 pb-1 text-[11px] font-medium text-sidebar-foreground">{t("blueprint.projects.recent")}</p>
+      <ul>
+        {recent.map((project) => {
+          const to = `/projects/${encodeURIComponent(project.id)}`;
+          const active = location.pathname === to || location.pathname.startsWith(`${to}/`);
+          return (
+            <li key={project.id}>
+              <Link
+                to={to}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex h-8 items-center gap-2.5 rounded-lg px-3 text-sm text-sidebar-accent-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                  active && "bg-sidebar-accent font-medium",
+                )}
+              >
+                <StageDot stage={projectStage(project)} />
+                <span className="truncate">{project.name}</span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
 
 function ChatThreadsSection({ collapsed }: { collapsed: boolean }) {
@@ -407,14 +410,11 @@ export function Sidebar({
           <Tooltip>
             <TooltipTrigger asChild>
               <Link
-                to="/"
+                to="/projects"
                 aria-label={APP_TITLE}
                 className="flex size-8 items-center justify-center rounded outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
               >
-                <AgentNativeIcon
-                  aria-hidden="true"
-                  className="h-3.5 w-6 text-sidebar-accent-foreground"
-                />
+                <BlueprintLogo className="size-6" />
               </Link>
             </TooltipTrigger>
             <TooltipContent side="right">{APP_TITLE}</TooltipContent>
@@ -422,13 +422,10 @@ export function Sidebar({
         ) : (
           <>
             <Link
-              to="/"
-              className="flex min-w-0 flex-1 items-center gap-3 rounded outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+              to="/projects"
+              className="flex min-w-0 flex-1 items-center gap-2.5 rounded outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
             >
-              <AgentNativeIcon
-                aria-hidden="true"
-                className="h-3.5 w-6 shrink-0 text-sidebar-accent-foreground"
-              />
+              <BlueprintLogo className="size-6 shrink-0" />
               <span className="truncate text-sm font-semibold text-sidebar-accent-foreground">
                 {APP_TITLE}
               </span>
@@ -445,7 +442,7 @@ export function Sidebar({
         )}
       >
         <ProjectsNavLink collapsed={collapsed} />
-        <HomeNavLink collapsed={collapsed} />
+        {collapsed ? null : <RecentProjects />}
         <ChatThreadsSection collapsed={collapsed} />
       </nav>
 

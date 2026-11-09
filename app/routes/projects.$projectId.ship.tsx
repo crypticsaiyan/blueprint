@@ -14,9 +14,10 @@ import {
   IconFileDiff,
   IconLoader2,
   IconPlayerPlay,
-  IconSparkles,
+  IconPlayerStop,
+  IconMessageCircle,
 } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -55,8 +56,27 @@ export default function ProjectShipRoute() {
   const [open, setOpen] = useState<string | null>(null);
   const runTests = useActionMutation("run-tests", {
     onSuccess: (result) => toast[result.status === "passed" ? "success" : "warning"](result.message, { duration: 7000 }),
-    onError: (error) => toast.error(actionErrorMessage(error) ?? t("blueprint.ship.testsFailed")),
+    onError: (error) => {
+      const message = actionErrorMessage(error) ?? t("blueprint.ship.testsFailed");
+      if (errorCode(error) === "tests_cancelled") toast(message);
+      else toast.error(message);
+    },
   });
+  // The agent can start a run too, so progress is read from the server.
+  const testProgress = useActionQuery(
+    "get-test-progress",
+    { projectId },
+    { refetchInterval: (query) => (runTests.isPending || query.state.data?.running ? 1500 : 10000) },
+  );
+  const running = runTests.isPending || Boolean(testProgress.data?.running);
+  const cancelTests = useActionMutation("cancel-tests", {
+    onError: (error) => toast.error(actionErrorMessage(error) ?? t("blueprint.ship.cancelFailed")),
+  });
+  // A run the agent started ends without this screen's mutation settling.
+  const wasRunning = useWasTrue(Boolean(testProgress.data?.running));
+  useEffect(() => {
+    if (wasRunning && !testProgress.data?.running) void status.refetch();
+  }, [wasRunning, testProgress.data?.running, status]);
   const createPr = useActionMutation("create-pr", {
     onSuccess: (result) => toast.success(result.message, { duration: 10000 }),
     onError: (error) => {
@@ -85,13 +105,16 @@ export default function ProjectShipRoute() {
       ok: Boolean(rehearsal && !rehearsal.stale && rehearsal.status === "passed"),
       label: t("blueprint.ship.checkRehearsal"),
     },
-    { ok: Boolean(test && test.status === "passed" && data.ready), label: t("blueprint.ship.checkTests") },
+    {
+      ok: Boolean(test && (test.status === "passed" || test.status === "none") && data.ready),
+      label: test?.status === "none" ? t("blueprint.ship.checkNoTests") : t("blueprint.ship.checkTests"),
+    },
     { ok: Boolean(data.pullRequest), label: t("blueprint.ship.checkPr") },
   ];
 
   return (
-    <div className="flex h-full min-h-0">
-      <aside className="w-80 shrink-0 space-y-6 overflow-y-auto border-e border-border p-5">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+      <aside className="w-full shrink-0 space-y-6 border-b border-border p-5 md:w-80 md:overflow-y-auto md:border-b-0 md:border-e">
         <ol className="space-y-2">
           {checks.map((check) => (
             <li key={check.label} className="flex items-center gap-2 text-sm">
@@ -115,13 +138,24 @@ export default function ProjectShipRoute() {
         <div className="space-y-2">
           <Button
             className="w-full gap-1.5"
-            variant={test?.status === "passed" && data.ready ? "outline" : "default"}
-            disabled={runTests.isPending}
+            variant={(test?.status === "passed" || test?.status === "none") && data.ready ? "outline" : "default"}
+            disabled={running}
             onClick={() => runTests.mutate({ projectId })}
           >
-            {runTests.isPending ? <IconLoader2 className="size-4 animate-spin" /> : <IconPlayerPlay className="size-4" />}
-            {runTests.isPending ? t("blueprint.ship.running") : t("blueprint.ship.runTests")}
+            {running ? <IconLoader2 className="size-4 animate-spin" /> : <IconPlayerPlay className="size-4" />}
+            {running ? t("blueprint.ship.running") : t("blueprint.ship.runTests")}
           </Button>
+          {running ? (
+            <Button
+              variant="outline"
+              className="w-full gap-1.5"
+              disabled={cancelTests.isPending || testProgress.data?.cancelling}
+              onClick={() => cancelTests.mutate({ projectId })}
+            >
+              <IconPlayerStop className="size-4" />
+              {testProgress.data?.cancelling ? t("blueprint.ship.cancelling") : t("blueprint.ship.cancelRun")}
+            </Button>
+          ) : null}
           {failing.length ? (
             <Button
               variant="outline"
@@ -134,7 +168,7 @@ export default function ProjectShipRoute() {
                 })
               }
             >
-              <IconSparkles className="size-4 text-ghost" />
+              <IconMessageCircle className="size-4 text-muted-foreground" />
               {t("blueprint.ship.fixTests")}
             </Button>
           ) : null}
@@ -177,41 +211,16 @@ export default function ProjectShipRoute() {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-5xl space-y-8 p-6">
+      <div className="min-w-0 flex-1 md:overflow-y-auto">
+        <div className="mx-auto max-w-5xl space-y-8 p-5 md:p-6">
           <section>
             <h2 className="mb-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               {t("blueprint.ship.tests")}
             </h2>
-            {test ? (
-              <div className="space-y-2">
-                <p className={cn("text-sm font-medium", test.status === "passed" ? "text-ok" : "text-conflict")}>
-                  {t("blueprint.ship.testSummary", { passed: test.passed, total: test.total, ms: test.durationMs })}
-                  <span className="ms-2 font-mono text-xs font-normal text-muted-foreground">{test.command}</span>
-                </p>
-                <ul className="divide-y divide-border rounded-md border border-border text-sm">
-                  {test.cases.map((c) => (
-                    <li key={`${c.file}:${c.name}`} className="px-3 py-1.5">
-                      <div className="flex items-center gap-2">
-                        {c.status === "passed" ? (
-                          <IconCircleCheck className="size-3.5 shrink-0 text-ok" />
-                        ) : c.status === "failed" ? (
-                          <IconAlertTriangle className="size-3.5 shrink-0 text-conflict" />
-                        ) : (
-                          <IconCircleDashed className="size-3.5 shrink-0 text-muted-foreground" />
-                        )}
-                        <span className="truncate">{c.name}</span>
-                        <span className="ms-auto shrink-0 font-mono text-[11px] text-muted-foreground">{c.file}</span>
-                      </div>
-                      {c.message ? (
-                        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-conflict/5 p-2 font-mono text-[11px] text-conflict">
-                          {c.message}
-                        </pre>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+            {running ? (
+              <TestProgress phase={testProgress.data?.phase ?? null} steps={testProgress.data?.steps ?? []} startedAt={testProgress.data?.startedAt ?? null} />
+            ) : test ? (
+              <TestResults test={test} />
             ) : (
               <p className="text-sm text-muted-foreground">{t("blueprint.ship.noTests")}</p>
             )}
@@ -239,7 +248,7 @@ export default function ProjectShipRoute() {
                           <span
                             className={cn(
                               "shrink-0 rounded px-1 text-[10px] font-medium uppercase",
-                              file.origin === "generated" ? "bg-ghost/15 text-ghost" : "bg-fill/15 text-fill",
+                              file.origin === "generated" ? "bg-muted text-muted-foreground" : "bg-foreground/10 text-foreground",
                             )}
                           >
                             {t(`blueprint.ship.origin.${file.origin}`)}
@@ -282,5 +291,146 @@ export default function ProjectShipRoute() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** True once `value` has been true, until the component unmounts. */
+function useWasTrue(value: boolean) {
+  const [was, setWas] = useState(false);
+  useEffect(() => {
+    if (value) setWas(true);
+  }, [value]);
+  return was;
+}
+
+function TestProgress({ phase, steps, startedAt }: { phase: string | null; steps: string[]; startedAt: string | null }) {
+  const t = useT();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const done = steps.slice(0, -1);
+  return (
+    <div className="space-y-3 rounded-md border border-border p-4">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <IconLoader2 className="size-4 animate-spin text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate">{phase ?? t("blueprint.ship.running")}</span>
+        {startedAt ? (
+          <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+            {duration(Math.max(0, now - Date.parse(startedAt)))}
+          </span>
+        ) : null}
+      </div>
+      {done.length ? (
+        <ol className="space-y-1 text-xs text-muted-foreground">
+          {done.map((step, i) => (
+            <li key={`${i}-${step}`} className="flex items-center gap-2">
+              <IconCircleCheck className="size-3.5 shrink-0" />
+              <span className="truncate">{step}</span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      <p className="text-xs text-muted-foreground">{t("blueprint.ship.progressHint")}</p>
+    </div>
+  );
+}
+
+type TestCaseView = { name: string; file: string; status: string; message?: string | undefined };
+
+const duration = (ms: number) =>
+  ms < 1000
+    ? `${ms} ms`
+    : ms < 60_000
+      ? `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`
+      : `${Math.floor(ms / 60_000)} min ${Math.floor((ms % 60_000) / 1000)} s`;
+
+/**
+ * Failures first, with their errors. Checks that also fail on the untouched
+ * code, and the passing ones, fold away: a real repo has hundreds.
+ */
+function TestResults({ test }: { test: { status: string; passed: number; total: number; durationMs: number; command: string; cases: TestCaseView[]; output: string } }) {
+  const t = useT();
+  if (test.status === "none" || (test.status === "error" && !test.cases.length)) {
+    return <p className="text-sm text-muted-foreground">{test.output}</p>;
+  }
+  const failed = test.cases.filter((c) => c.status === "failed");
+  const known = test.cases.filter((c) => c.status === "preexisting");
+  const passed = test.cases.filter((c) => c.status === "passed" || c.status === "skipped");
+  const commands = test.command.split(" && ").filter(Boolean);
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <p className={cn("text-sm font-medium", test.status === "passed" ? "text-ok" : "text-conflict")}>
+          {t("blueprint.ship.testSummary", { passed: test.passed, total: test.total, duration: duration(test.durationMs) })}
+        </p>
+        {commands.length > 1 ? (
+          <details className="group text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none hover:text-foreground">{t("blueprint.ship.suites", { count: commands.length })}</summary>
+            <ul className="mt-1 space-y-0.5 font-mono text-[11px]">
+              {commands.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+          </details>
+        ) : (
+          <span className="font-mono text-xs text-muted-foreground">{test.command}</span>
+        )}
+      </div>
+      {failed.length ? <CaseList cases={failed} /> : null}
+      {known.length ? (
+        <details className="rounded-md border border-border">
+          <summary className="cursor-pointer select-none px-3 py-2 text-sm text-muted-foreground hover:text-foreground">
+            {t("blueprint.ship.preexistingGroup", { count: known.length })}
+          </summary>
+          <CaseList cases={known} flush />
+        </details>
+      ) : null}
+      {passed.length ? (
+        <details className="rounded-md border border-border">
+          <summary className="cursor-pointer select-none px-3 py-2 text-sm text-muted-foreground hover:text-foreground">
+            <IconCircleCheck className="me-1.5 inline size-3.5 text-ok" />
+            {t("blueprint.ship.passedGroup", { count: passed.length })}
+          </summary>
+          <CaseList cases={passed} flush />
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+const CASE_LIMIT = 300;
+
+function CaseList({ cases, flush }: { cases: TestCaseView[]; flush?: boolean }) {
+  const t = useT();
+  return (
+    <ul className={cn("divide-y divide-border text-sm", flush ? "border-t border-border" : "rounded-md border border-border")}>
+      {cases.slice(0, CASE_LIMIT).map((c) => (
+        <li key={`${c.file}:${c.name}`} className="px-3 py-1.5">
+          <div className="flex items-center gap-2">
+            {c.status === "passed" ? (
+              <IconCircleCheck className="size-3.5 shrink-0 text-ok" />
+            ) : c.status === "failed" ? (
+              <IconAlertTriangle className="size-3.5 shrink-0 text-conflict" />
+            ) : (
+              <IconCircleDashed className="size-3.5 shrink-0 text-muted-foreground" />
+            )}
+            <span className="min-w-0 truncate" title={c.name}>{c.name}</span>
+            <span className="ms-auto max-w-[45%] shrink-0 truncate font-mono text-[11px] text-muted-foreground" title={c.file}>
+              {c.file}
+            </span>
+          </div>
+          {c.message && c.status === "failed" ? (
+            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-conflict/5 p-2 font-mono text-[11px] text-conflict">
+              {c.message}
+            </pre>
+          ) : null}
+        </li>
+      ))}
+      {cases.length > CASE_LIMIT ? (
+        <li className="px-3 py-1.5 text-xs text-muted-foreground">{t("blueprint.ship.moreCases", { count: cases.length - CASE_LIMIT })}</li>
+      ) : null}
+    </ul>
   );
 }

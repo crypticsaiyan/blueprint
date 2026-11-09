@@ -279,7 +279,7 @@ function ImpactList({
                 <span
                   className={cn(
                     "rounded px-1 py-px text-[10px] font-medium uppercase",
-                    impact.severity === "breaks" ? "bg-conflict/15 text-conflict" : "bg-ghost/15 text-ghost",
+                    impact.severity === "breaks" ? "bg-conflict/15 text-conflict" : "bg-fill/15 text-fill",
                   )}
                 >
                   {t(`blueprint.code.${impact.severity}`)}

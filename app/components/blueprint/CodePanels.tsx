@@ -1,7 +1,7 @@
 import { sendToAgentChat } from "@agent-native/core/client/agent-chat";
 import { actionErrorMessage, useActionMutation } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
-import { IconAlertTriangle, IconArrowRight, IconBan, IconSparkles } from "@tabler/icons-react";
+import { IconAlertTriangle, IconArrowRight, IconBan, IconMessageCircle } from "@tabler/icons-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -19,7 +19,7 @@ function UsageRow({ usage, impacts, showModule }: { usage: QueryUsage; impacts: 
     <li
       className={cn(
         "rounded-md border px-2 py-1.5",
-        worst === "breaks" ? "border-conflict/50 bg-conflict/5" : worst === "review" ? "border-ghost/40 bg-ghost/5" : "border-transparent",
+        worst === "breaks" ? "border-conflict/50 bg-conflict/5" : worst === "review" ? "border-fill/40 bg-fill/5" : "border-transparent",
       )}
     >
       <p className="flex items-center gap-1.5 font-mono text-[11.5px]">
@@ -39,7 +39,7 @@ function UsageRow({ usage, impacts, showModule }: { usage: QueryUsage; impacts: 
       {mine.map((impact) => (
         <p
           key={impact.itemId + impact.reason}
-          className={cn("mt-0.5 text-[11px]", impact.severity === "breaks" ? "text-conflict" : "text-ghost")}
+          className={cn("mt-0.5 text-[11px]", impact.severity === "breaks" ? "text-conflict" : "text-fill")}
         >
           {impact.reason}
         </p>
@@ -71,7 +71,7 @@ export function ModuleDetail({ path, code, impacts, rules }: { path: string; cod
             sendToAgentChat({ message: t("blueprint.code.fixModulePrompt", { path }), submit: true, openSidebar: true })
           }
         >
-          <IconSparkles className="size-3.5 text-ghost" />
+          <IconMessageCircle className="size-3.5 text-muted-foreground" />
           {t("blueprint.code.fixModule")}
         </Button>
       ) : null}

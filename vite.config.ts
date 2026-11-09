@@ -14,6 +14,10 @@ export default defineConfig({
       "app/components/layout/{Layout,Sidebar}.tsx",
       "app/components/chat/ChatRouteContent.tsx",
       "app/routes/{home,chat.$threadId}.tsx",
+      // Blueprint screens: scanned up front so the first visit to a tab does
+      // not trigger Vite's "new dependencies found" full page reload.
+      "app/routes/projects*.tsx",
+      "app/components/blueprint/*.tsx",
     ],
   },
   plugins: [

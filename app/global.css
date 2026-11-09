@@ -1,4 +1,8 @@
-@import "@fontsource-variable/inter";
+/* Inter with its optical-size axis: large text gets the Display cut
+   automatically (Linear's Inter Display headings), UI text stays Inter. */
+@import "@fontsource-variable/inter/opsz.css";
+/* Code, columns, SQL and paths: JetBrains Mono, the usual dev-tool pairing for Inter. */
+@import "@fontsource-variable/jetbrains-mono";
 
 @import "tailwindcss";
 @import "@agent-native/toolkit/styles.css";
@@ -6,34 +10,37 @@
 @source "./**/*.{ts,tsx}";
 
 :root {
+  /* Monochrome chrome from Radix Slate (steps used for their roles: 1-2
+     backgrounds, 3-5 component states, 6-8 borders, 11-12 text). Actions are
+     near-black; color appears only where it means something (see --bp-*). */
   --background: 0 0% 100%;
-  --foreground: 0 0% 10%;
+  --foreground: 210 12% 13%;
   --card: 0 0% 100%;
-  --card-foreground: 0 0% 10%;
+  --card-foreground: 210 12% 13%;
   --popover: 0 0% 100%;
-  --popover-foreground: 0 0% 10%;
-  --primary: 0 0% 15%;
+  --popover-foreground: 210 12% 13%;
+  --primary: 210 12% 13%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 0 0% 95%;
-  --secondary-foreground: 0 0% 15%;
-  --muted: 0 0% 95%;
-  --muted-foreground: 0 0% 43%;
-  --accent: 0 0% 95%;
-  --accent-foreground: 0 0% 15%;
-  --destructive: 0 91% 71%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 90%;
-  --input: 0 0% 90%;
-  --ring: 0 0% 40%;
+  --secondary: 240 11% 95%;
+  --secondary-foreground: 210 12% 13%;
+  --muted: 240 11% 95%;
+  --muted-foreground: 220 6% 40%;
+  --accent: 240 10% 92%;
+  --accent-foreground: 210 12% 13%;
+  --destructive: 358 65% 49%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 240 10% 88%;
+  --input: 233 10% 82%;
+  --ring: 231 10% 70%;
   --radius: 0.5rem;
-  --sidebar-background: 0 0% 97%;
-  --sidebar-foreground: 0 0% 43%;
-  --sidebar-primary: 0 0% 15%;
+  --sidebar-background: 240 20% 98%;
+  --sidebar-foreground: 220 6% 40%;
+  --sidebar-primary: 210 12% 13%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 0 0% 95%;
-  --sidebar-accent-foreground: 0 0% 15%;
-  --sidebar-border: 0 0% 90%;
-  --sidebar-ring: 0 0% 40%;
+  --sidebar-accent: 240 10% 92%;
+  --sidebar-accent-foreground: 210 12% 13%;
+  --sidebar-border: 240 10% 90%;
+  --sidebar-ring: 231 10% 70%;
   --chat-sidebar-width: 17.5rem;
   --chat-sidebar-content-inset: 0.5rem;
   --chat-sidebar-row-padding: 0.75rem;
@@ -229,34 +236,34 @@
 }
 
 .dark {
-  --background: 0 0% 13%;
-  --foreground: 0 0% 90%;
-  --card: 0 0% 16.47%;
-  --card-foreground: 0 0% 90%;
-  --popover: 0 0% 15%;
-  --popover-foreground: 0 0% 90%;
-  --primary: 0 0% 75%;
-  --primary-foreground: 0 0% 10%;
-  --secondary: 0 0% 18%;
-  --secondary-foreground: 0 0% 90%;
-  --muted: 0 0% 16%;
-  --muted-foreground: 0 0% 60%;
-  --accent: 0 0% 18%;
-  --accent-foreground: 0 0% 90%;
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 24%;
-  --input: 0 0% 24%;
-  --ring: 0 0% 60%;
+  --background: 240 6% 7%;
+  --foreground: 220 9% 94%;
+  --card: 220 6% 10%;
+  --card-foreground: 220 9% 94%;
+  --popover: 220 6% 10%;
+  --popover-foreground: 220 9% 94%;
+  --primary: 220 9% 94%;
+  --primary-foreground: 240 6% 7%;
+  --secondary: 225 6% 14%;
+  --secondary-foreground: 220 9% 94%;
+  --muted: 225 6% 14%;
+  --muted-foreground: 216 7% 71%;
+  --accent: 210 7% 16%;
+  --accent-foreground: 220 9% 94%;
+  --destructive: 2 100% 79%;
+  --destructive-foreground: 240 6% 7%;
+  --border: 213 8% 21%;
+  --input: 213 8% 28%;
+  --ring: 213 8% 40%;
   --radius: 0.5rem;
-  --sidebar-background: 0 0% 10%;
-  --sidebar-foreground: 0 0% 60%;
-  --sidebar-primary: 0 0% 75%;
-  --sidebar-primary-foreground: 0 0% 10%;
-  --sidebar-accent: 0 0% 16%;
-  --sidebar-accent-foreground: 0 0% 90%;
-  --sidebar-border: 0 0% 20%;
-  --sidebar-ring: 0 0% 60%;
+  --sidebar-background: 240 7% 5%;
+  --sidebar-foreground: 216 7% 71%;
+  --sidebar-primary: 220 9% 94%;
+  --sidebar-primary-foreground: 240 6% 7%;
+  --sidebar-accent: 210 7% 14%;
+  --sidebar-accent-foreground: 220 9% 94%;
+  --sidebar-border: 213 8% 15%;
+  --sidebar-ring: 213 8% 40%;
 }
 
 @layer base {
@@ -264,6 +271,28 @@
     @apply bg-background text-foreground;
     font-family: "Inter Variable", "Inter", sans-serif;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  /* Display sizes run tighter, as Inter Display and Geist do. */
+  h1,
+  h2 {
+    letter-spacing: -0.015em;
+  }
+  /* Ligatures read as code-editor flourishes in a UI; keep them off. */
+  .font-mono,
+  code,
+  pre,
+  kbd {
+    font-variant-ligatures: none;
+  }
+  /* Numbers in tables and counts line up. */
+  .tabular-nums,
+  table,
+  time {
+    font-variant-numeric: tabular-nums;
   }
 }
 
@@ -284,20 +313,24 @@
 
 /* Blueprint: ghost (proposed), conflict, backfill, and passed states. */
 :root {
-  --bp-ghost: 214 88% 50%;
-  --bp-conflict: 0 74% 52%;
-  --bp-fill: 32 92% 44%;
-  --bp-ok: 152 58% 36%;
-  --bp-grid: 0 0% 82%;
+  /* The only colors in the UI, each with one meaning (step 11 of the Radix
+     scales, readable as text): blue = proposed schema change, green = ready,
+     red = conflict or failure, amber = backfill or needs review. */
+  --bp-ghost: 226 56% 50%;
+  --bp-conflict: 358 65% 49%;
+  --bp-fill: 35 100% 34%;
+  --bp-ok: 154 60% 32%;
+  --bp-grid: 230 11% 86%;
 }
 .dark {
-  --bp-ghost: 214 92% 66%;
-  --bp-conflict: 0 84% 64%;
-  --bp-fill: 38 92% 58%;
-  --bp-ok: 152 55% 52%;
-  --bp-grid: 0 0% 24%;
+  --bp-ghost: 228 100% 81%;
+  --bp-conflict: 2 100% 79%;
+  --bp-fill: 46 100% 54%;
+  --bp-ok: 151 65% 54%;
+  --bp-grid: 214 7% 19%;
 }
 @theme inline {
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   --color-ghost: hsl(var(--bp-ghost));
   --color-conflict: hsl(var(--bp-conflict));
   --color-fill: hsl(var(--bp-fill));

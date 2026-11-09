@@ -7,7 +7,7 @@ import {
   IconCircleDashed,
   IconCircleX,
   IconPlayerPlay,
-  IconSparkles,
+  IconMessageCircle,
   IconTool,
 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
@@ -108,15 +108,18 @@ export function RehearsalView({
               <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 {t("blueprint.rehearsal.data")}
               </h2>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ms-auto h-7 gap-1.5 text-xs"
-                onClick={() => setReplay((n) => n + 1)}
-              >
-                <IconPlayerPlay className="size-3.5" />
-                {t("blueprint.rehearsal.replay")}
-              </Button>
+              {/* Replay animates rows; with none there is nothing to show. */}
+              {result.tables.some((table) => table.rows.length) ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ms-auto h-7 gap-1.5 text-xs"
+                  onClick={() => setReplay((n) => n + 1)}
+                >
+                  <IconPlayerPlay className="size-3.5" />
+                  {t("blueprint.rehearsal.replay")}
+                </Button>
+              ) : null}
             </div>
             <div className="space-y-6">
               {result.tables.map((table) => (
@@ -212,7 +215,7 @@ function ConflictCard({ conflict, projectId }: { conflict: ConflictReport; proje
             })
           }
         >
-          <IconSparkles className="size-3.5 text-ghost" />
+          <IconMessageCircle className="size-3.5 text-muted-foreground" />
           {t("blueprint.rehearsal.askAgent")}
         </Button>
       </header>
@@ -287,6 +290,14 @@ function TableDiffView({ diff, conflictKeys }: { diff: TableDiff; conflictKeys?:
   }, []);
   const after = phase === "after";
   const rows = diff.rows.filter((row) => after || row.status !== "added");
+  // Wide tables: new columns sit right after the first one, where they show.
+  const columns = diff.isNew
+    ? diff.columns
+    : [
+        ...diff.columns.slice(0, 1),
+        ...diff.newColumns.filter((c) => c !== diff.columns[0]),
+        ...diff.columns.slice(1).filter((c) => !diff.newColumns.includes(c)),
+      ];
   return (
     <div>
       <div className="mb-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -309,11 +320,14 @@ function TableDiffView({ diff, conflictKeys }: { diff: TableDiff; conflictKeys?:
             .join(" · ")}
         </span>
       </div>
+      {diff.rows.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("blueprint.rehearsal.noRows")}</p>
+      ) : (
       <div className="max-h-96 overflow-auto rounded-md border border-border">
         <table className="w-full font-mono text-[11.5px]">
           <thead className="sticky top-0 z-10 bg-muted/80 text-muted-foreground backdrop-blur">
             <tr>
-              {diff.columns.map((c) => {
+              {columns.map((c) => {
                 const fresh = diff.newColumns.includes(c) && !diff.isNew;
                 return (
                   <th
@@ -345,7 +359,7 @@ function TableDiffView({ diff, conflictKeys }: { diff: TableDiff; conflictKeys?:
                   )}
                   style={after && row.status === "added" ? delay : undefined}
                 >
-                  {diff.columns.map((c) => {
+                  {columns.map((c) => {
                     const source = after && !deleted ? row.after : row.before;
                     const fresh = diff.newColumns.includes(c) && !diff.isNew;
                     const changed = after && row.status === "changed" && row.changed.includes(c);
@@ -387,6 +401,7 @@ function TableDiffView({ diff, conflictKeys }: { diff: TableDiff; conflictKeys?:
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

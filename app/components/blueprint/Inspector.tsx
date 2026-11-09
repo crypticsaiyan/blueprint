@@ -10,7 +10,7 @@ import {
   IconDatabase,
   IconKey,
   IconRefresh,
-  IconSparkles,
+  IconMessageCircle,
   IconTrash,
 } from "@tabler/icons-react";
 import { useState } from "react";
@@ -114,11 +114,12 @@ export function Inspector({
                 key={c.name}
                 className={cn("flex items-center gap-1.5", c.ghost && "text-ghost")}
               >
-                {c.isPrimaryKey ? <IconKey className="size-3 text-fill" /> : <span className="size-3" />}
-                <span>{c.name}</span>
-                <span className="ms-auto text-muted-foreground">
+                {c.isPrimaryKey ? <IconKey className="size-3 shrink-0 text-fill" /> : <span className="size-3 shrink-0" />}
+                <span className="min-w-0 truncate" title={c.name}>{c.name}</span>
+                {/* Same notation as the canvas: "?" marks a nullable column. */}
+                <span className="ms-auto max-w-[55%] shrink-0 truncate ps-2 text-end text-muted-foreground" title={c.type}>
                   {shortType(c.type)}
-                  {c.nullable ? "" : " not null"}
+                  {c.nullable ? "?" : ""}
                 </span>
               </li>
             ))}
@@ -129,7 +130,7 @@ export function Inspector({
             {t("blueprint.inspector.changes")}
           </h3>
           {related.length ? (
-            <ul className="-mx-2.5 space-y-0.5">
+            <ul className="space-y-2">
               {related.map((item) => (
                 <ChangeItemRow
                   key={item.id}
@@ -160,7 +161,7 @@ export function Inspector({
   }
 
   return (
-    <aside className="flex h-full w-80 shrink-0 flex-col overflow-hidden border-s border-border bg-background">
+    <aside className="flex h-[45%] w-full shrink-0 flex-col overflow-hidden border-t border-border bg-background md:h-full md:w-80 md:border-s md:border-t-0">
       <div className="min-h-0 flex-1 overflow-y-auto">
         {detail}
         <section className="p-4">
@@ -182,7 +183,7 @@ export function Inspector({
           </div>
           {goal ? <p className="mb-2 text-sm font-medium">{goal}</p> : null}
           {ordered.length ? (
-            <ul className="-mx-2.5 space-y-0.5">
+            <ul className="space-y-2">
               {ordered.map((item) => (
                 <ChangeItemRow
                   key={item.id}
@@ -208,7 +209,7 @@ export function Inspector({
                     className="justify-start gap-2"
                     onClick={() => ask(prompt!)}
                   >
-                    <IconSparkles className="size-3.5 text-ghost" />
+                    <IconMessageCircle className="size-3.5 text-muted-foreground" />
                     {label}
                   </Button>
                 ))}
@@ -282,7 +283,7 @@ function EdgeDetail({
         {edge.refTable}.{edge.refColumn}
       </p>
       {edge.constraint ? <p className="font-mono text-xs text-muted-foreground">{edge.constraint}</p> : null}
-      {owner ? <ul className="-mx-2.5"><ChangeItemRow item={owner} projectId={projectId} /></ul> : null}
+      {owner ? <ul><ChangeItemRow item={owner} projectId={projectId} /></ul> : null}
       {!edge.dropped ? (
         <Button variant="outline" size="sm" className="gap-1.5" disabled={checking} onClick={openPreview}>
           <IconTrash className="size-3.5" />

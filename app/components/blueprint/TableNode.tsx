@@ -11,27 +11,41 @@ export type TableNodeData = {
   selected: boolean;
   affected: boolean;
   conflict: boolean;
+  /** Large schemas: show only key, proposed and constrained columns. */
+  compact: boolean;
+  /** Draws attention when a hovered or selected node relates to this table. */
+  dimmed: boolean;
 };
 export type TableFlowNode = Node<TableNodeData, "table">;
 
+/** Postgres type names as people write them: timestamptz(3), varchar(255). */
 export function shortType(type: string) {
   return type
-    .replace("timestamp with time zone", "timestamptz")
-    .replace("timestamp without time zone", "timestamp")
-    .replace("character varying", "varchar");
+    .replace(/^timestamp(\(\d+\))? with time zone/, "timestamptz$1")
+    .replace(/^timestamp(\(\d+\))? without time zone/, "timestamp$1")
+    .replace(/^time(\(\d+\))? with time zone/, "timetz$1")
+    .replace(/^time(\(\d+\))? without time zone/, "time$1")
+    .replace(/^character varying/, "varchar")
+    .replace(/^double precision/, "float8");
 }
 
 export const TableNode = memo(function TableNode({ data }: NodeProps<TableFlowNode>) {
   const t = useT();
-  const { table, selected, affected, conflict } = data;
+  const { table, selected, affected, conflict, compact, dimmed } = data;
   const ghost = Boolean(table.ghost);
+  const shown =
+    compact && !selected && !ghost
+      ? table.columns.filter((c) => c.isPrimaryKey || c.ghost || c.ghostConstraints?.length)
+      : table.columns;
+  const hidden = table.columns.length - shown.length;
   return (
     <div
       className={cn(
-        "w-60 rounded-lg border bg-card text-card-foreground shadow-sm transition-shadow",
+        "w-60 rounded-lg border bg-card text-card-foreground shadow-sm transition-[box-shadow,opacity]",
         ghost ? "border-dashed border-ghost bg-ghost/5" : "border-border",
         selected && "ring-2 ring-ring ring-offset-2 ring-offset-background",
         conflict ? "bp-glow-conflict" : affected && "bp-glow",
+        dimmed && "opacity-40",
       )}
     >
       <Handle id="fk-out" type="source" position={Position.Left} aria-label={`${table.name} belongs to`} />
@@ -74,7 +88,7 @@ export const TableNode = memo(function TableNode({ data }: NodeProps<TableFlowNo
         </span>
       </div>
       <ul className="py-1">
-        {table.columns.map((column) => {
+        {shown.map((column) => {
           const proposed = Boolean(column.ghost) && !ghost;
           return (
             <li
@@ -107,6 +121,11 @@ export const TableNode = memo(function TableNode({ data }: NodeProps<TableFlowNo
             </li>
           );
         })}
+        {hidden > 0 ? (
+          <li className="px-3 pt-0.5 pb-[3px] ps-[2.1rem] text-[11px] text-muted-foreground">
+            {t("blueprint.canvas.moreColumns", { count: hidden })}
+          </li>
+        ) : null}
       </ul>
       <Handle id="fk-in" type="target" position={Position.Right} aria-label={`Rows that belong to ${table.name}`} />
     </div>

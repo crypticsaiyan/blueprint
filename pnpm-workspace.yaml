@@ -1,3 +1,8 @@
+# Only Blueprint itself: imported repos and their working copies under data/
+# have their own package.json files and must not join this workspace.
+packages:
+  - "."
+
 allowBuilds:
   tesseract.js: true
   node-pty: true

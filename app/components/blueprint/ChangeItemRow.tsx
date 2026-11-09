@@ -85,8 +85,8 @@ export function ChangeItemRow({
   return (
     <li
       className={cn(
-        "group rounded-md border px-2.5 py-2 text-sm transition-colors",
-        selected ? "border-ring bg-accent" : "border-transparent hover:bg-accent/60",
+        "group rounded-lg border bg-card px-3 py-2.5 text-sm shadow-xs transition-colors",
+        selected ? "border-ring bg-accent" : "border-border hover:border-foreground/20",
         rejected && "opacity-60",
         conflict && "border-conflict/60 bg-conflict/5",
       )}
@@ -103,31 +103,40 @@ export function ChangeItemRow({
           {item.reason ? (
             <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">{item.reason}</span>
           ) : null}
-          <span className="mt-1 flex flex-wrap items-center gap-1 text-[10px] font-medium uppercase tracking-wide">
+          <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
             <span
               className={cn(
-                "rounded px-1 py-px",
-                item.status === "accepted" && "bg-ok/15 text-ok",
-                item.status === "proposed" && "bg-ghost/15 text-ghost",
+                "inline-flex items-center gap-1.5 rounded-full px-1.5 py-px capitalize",
+                item.status === "accepted" && "bg-ok/10 text-ok",
+                item.status === "proposed" && "bg-muted text-foreground",
                 item.status === "rejected" && "bg-muted text-muted-foreground",
               )}
             >
+              <span
+                aria-hidden
+                className={cn(
+                  "size-1.5 rounded-full",
+                  item.status === "accepted" && "bg-ok",
+                  item.status === "proposed" && "bg-foreground/60",
+                  item.status === "rejected" && "bg-muted-foreground",
+                )}
+              />
               {t(`blueprint.inspector.${item.status}`)}
             </span>
             {item.origin === "drawing" ? (
-              <span className="rounded bg-muted px-1 py-px text-muted-foreground">
+              <span className="rounded bg-muted px-1.5 py-px text-muted-foreground">
                 {t("blueprint.inspector.drawn")}
               </span>
             ) : null}
             {item.locked ? (
-              <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1 py-px text-foreground">
+              <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-px text-foreground">
                 <IconLock className="size-2.5" />
                 {t("blueprint.inspector.locked")}
               </span>
             ) : null}
           </span>
         </button>
-        <div className="flex shrink-0 items-center opacity-70 transition-opacity group-hover:opacity-100">
+        <div className="flex shrink-0 items-center opacity-50 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
           <IconAction
             label={t("blueprint.inspector.accept")}
             active={item.status === "accepted"}

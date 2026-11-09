@@ -15,7 +15,7 @@ export default function ProjectRehearseRoute() {
       stale={Boolean(rehearsal?.stale)}
       empty={
         <div className="mx-auto flex max-w-md flex-col items-center gap-3 px-6 py-20 text-center">
-          <IconFlask className="size-8 text-ghost" strokeWidth={1.5} />
+          <IconFlask className="size-8 text-muted-foreground" strokeWidth={1.5} />
           <p className="text-sm font-medium">{t("blueprint.rehearsal.empty")}</p>
           <p className="text-sm text-muted-foreground">{t("blueprint.rehearsal.runFirst")}</p>
         </div>
