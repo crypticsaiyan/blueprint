@@ -36,7 +36,7 @@ Before building common workspace or agent UI, read `agent-native-toolkit`; for s
 
 Ship Postgres schema changes safely. `/projects` imports repo + SQL dump; `/projects/:id` map (modules above tables, ghosts); `/rehearse` last rehearsal; `/ship` diff, tests, PR.
 
-- Schema comes from the dump's Postgres catalogs. One open changeset of items: proposed/accepted/rejected, optional lock. Never re-propose a locked rejection; re-plan = `replan-changeset` then `propose-changeset`.
+- Schema comes from the dump's Postgres catalogs: public tables by name, other app schemas as `schema.table`. One open changeset of items: proposed/accepted/rejected, optional lock. Never re-propose a locked rejection; re-plan = `replan-changeset` then `propose-changeset`.
 - Required column = `nullable:false` + backfill item; compiler adds nullable, backfills parents-first, enforces NOT NULL.
 - Rehearsals run on a PGlite copy. Report conflicts with table and row count; user picks fixes unless told otherwise.
 - Code fixes land in a per-changeset working copy via `fix-queries`; schema, migration, and dump are generated. `run-tests` = tests + typecheck + rules on migrated data.
@@ -45,8 +45,10 @@ Ship Postgres schema changes safely. `/projects` imports repo + SQL dump; `/proj
 | Action | Purpose |
 |---|---|
 | import-repo / get-project-map | Import; read tables, modules, queries, items |
+| list-projects / delete-project | List projects; delete one with its files (always confirm first) |
 | propose-changeset / update-change-item / replan-changeset | Plan and steer |
 | draw-table / draw-relationship / delete-relationship | Canvas drawing |
+| arrange-map | Re-lay the map by FK depth (ask first if user dragged nodes) |
 | rehearse-migration / resolve-conflict | Run on data copy; fix conflicts |
 | find-code-impact / read-code-file / fix-queries / run-tests | Fix broken code |
 | add-rule | Forbid a module dependency |
